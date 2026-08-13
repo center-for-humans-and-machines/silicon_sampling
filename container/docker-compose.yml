@@ -1,0 +1,74 @@
+services:
+  claude-gpu:
+    image: silicon_sampling:gpu
+    profiles:
+      - gpu
+    build:
+      context: ..
+      dockerfile: container/Dockerfile.gpu
+      network: host
+    user: "1000:1000"
+    gpus: all
+    environment:
+      CC_OUTPUT_DIR: "/var/cc_output"
+      BASH_MAX_TIMEOUT_MS: "21600000"
+      NVIDIA_VISIBLE_DEVICES: "all"
+      NVIDIA_DRIVER_CAPABILITIES: "compute,utility"
+      TORCH_CUDA_ARCH_LIST: "8.9"
+      PATH: "/home/claude/.local/bin:/opt/claude_tools/CC_command_server/scripts:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      HTTP_PASSWORD: "snipsnap"
+      HTTP_USERNAME: "admin"
+    env_file:
+      - "${HOME}/secrets/.cc_env"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stdin_open: true
+    tty: true
+    working_dir: /opt/silicon_sampling
+    volumes:
+      - ${HOME}/.claude:/home/claude/.claude
+      - ${HOME}/.claude.json:/home/claude/.claude.json
+      - ${HOME}/github_repos/silicon_sampling:/opt/silicon_sampling
+      - ${HOME}/tmp/cc_logs:/var/cc_output
+      - ${HOME}/tmp/cluster_transfer:/var/cluster_transfer
+      - ${HOME}/claude_tools:/opt/claude_tools:ro
+      - ${HOME}/secrets/silicon_sampling_deploy_key:/home/claude/.ssh
+    entrypoint: ["claude"]
+    command: ["--dangerously-skip-permissions"]
+    depends_on:
+      - docker-proxy
+    networks:
+      - cc_connection
+
+  cc_command_server:
+    image: cc-cmd-server
+    environment:
+      CC_MAX_JOBS: "4"
+      CC_HOST: "0.0.0.0"
+      CC_PORT: "8765"
+      CC_PROJECT: "social_deduction"
+      PATH: "/app/CC_command_server/scripts:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      HTTP_PASSWORD: "snipsnap"
+      PLAYER_SERVER_URL: "http://sh_player:5000"
+      MONGO_URL: "sh_mongo"
+      MONGO_SH_URL: "sh_mongo"
+    build:
+      dockerfile: ${HOME}/claude_tools/CC_command_server/Dockerfile
+      context: ${HOME}/claude_tools/CC_command_server
+      network: host
+    volumes:
+      - ${HOME}/secrets/cc_ssh_keys:/root/.ssh
+      - ${HOME}/tmp/cc_logs:/var/cc_output
+      - ${HOME}/tmp/cluster_transfer:/var/cluster_transfer
+      - ${HOME}/github_repos/silicon_sampling:/opt/silicon_sampling
+      - ${HOME}/claude_tools/CC_command_server:/app/CC_command_server
+    networks:
+      - cc_connection
+
+networks:
+  cc_connection:
+    enable_ipv6: true
+    driver_opts:
+      com.docker.network.driver.mtu: 1492

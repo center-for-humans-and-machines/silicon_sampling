@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+[project]
+name = "silicon_sampling"
+dynamic = ["version"]
+requires-python = ">= 3.10"
+authors = [
+  {name = "Yannik Keller", email = "yannik@kelnet.de"},
+]
+description = "Silicon Sampling challenge"
+readme = "README.md"
+keywords = ["silicon sampling", "LLM"]
+[tool.hatch.version]
+path = "silicon_sampling/__init__.py"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["silicon_sampling"]
