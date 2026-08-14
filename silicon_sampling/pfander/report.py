@@ -272,10 +272,14 @@ def demographics_report(frame: pd.DataFrame, out: Path, plots: Path) -> dict:
         ],
         ignore_index=True,
     )
+    subgroup_plots = []
     for name in ("gender", "age_band", "race"):
-        part = subgroup[subgroup["moderator"] == name]
+        part = (
+            subgroup[subgroup["moderator"] == name] if not subgroup.empty else subgroup
+        )
         if part.empty:
             continue
+        subgroup_plots.append(name)
         series = {
             str(level): part[part["level"] == level]
             .set_index("condition")
@@ -293,6 +297,14 @@ def demographics_report(frame: pd.DataFrame, out: Path, plots: Path) -> dict:
             figsize=(10.5, 4.6),
         )
 
+    subgroup_figures = (
+        "\n\n".join(
+            f"![Subgroup effects by {name}](plots/02_subgroup_{name}.png)"
+            for name in subgroup_plots
+        )
+        if subgroup_plots
+        else "_Too few respondents per subgroup cell for level-wise effect estimates._"
+    )
     strongest = tests.sort_values("p").head(15)
     marginals = pd.concat(
         [
@@ -332,11 +344,7 @@ Strongest 15 interactions:
 
 {md_table(strongest[["moderator", "outcome", "n", "interaction_terms", "chi2", "df", "p", "r2"]], floats=4)}
 
-![Subgroup effects by gender](plots/02_subgroup_gender.png)
-
-![Subgroup effects by age band](plots/02_subgroup_age_band.png)
-
-![Subgroup effects by race](plots/02_subgroup_race.png)
+{subgroup_figures}
 
 ## 3. How much is demographics alone? (stereotyping diagnostic)
 
@@ -626,12 +634,17 @@ def generate(samples_csv: Path, run_dir: Path, out: Path) -> dict:
     top_predict = part2["predict"].sort_values("r2_moderator", ascending=False).iloc[0]
 
     counts = frame["condition"].value_counts()
+    per_arm = counts.drop("control", errors="ignore")
+    arm_text = (
+        f"{per_arm.min():,} per intervention"
+        if per_arm.min() == per_arm.max()
+        else f"{per_arm.min():,}-{per_arm.max():,} per intervention"
+    )
     text = f"""# Silicon sample of the Pfänder megastudy — main results
 
 Qwen2.5-7B (base), sampled respondent by respondent through a text transcript of
 the full instrument. **N = {len(frame):,}** synthetic respondents across
-{frame['condition'].nunique()} conditions ({counts.get('control', 0):,} control,
-{counts.drop('control', errors='ignore').min():,}-{counts.drop('control', errors='ignore').max():,} per intervention).
+{frame['condition'].nunique()} conditions ({counts.get('control', 0):,} control, {arm_text}).
 
 Sub-reports: [1 · intervention effects](01_effects.md) ·
 [2 · demographics](02_demographics.md) ·

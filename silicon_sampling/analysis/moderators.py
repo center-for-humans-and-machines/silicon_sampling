@@ -93,6 +93,21 @@ def moderation_test(
     }
 
 
+#: Kept explicit so a moderator with no usable level still yields a frame that
+#: downstream code can filter, rather than an empty one with no columns.
+SUBGROUP_COLUMNS = (
+    "moderator",
+    "level",
+    "outcome",
+    "condition",
+    "estimate",
+    "se",
+    "conf_low",
+    "conf_high",
+    "p",
+)
+
+
 def subgroup_effects(
     frame: pd.DataFrame,
     moderator: str,
@@ -132,7 +147,7 @@ def subgroup_effects(
                     "p": term["p"],
                 }
             )
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=SUBGROUP_COLUMNS)
 
 
 def predictability(
