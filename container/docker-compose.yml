@@ -1,8 +1,6 @@
 services:
   claude-gpu:
     image: silicon_sampling:gpu
-    profiles:
-      - gpu
     build:
       context: ..
       dockerfile: container/Dockerfile.gpu
@@ -16,8 +14,6 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: "compute,utility"
       TORCH_CUDA_ARCH_LIST: "8.9"
       PATH: "/home/claude/.local/bin:/opt/claude_tools/CC_command_server/scripts:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-      HTTP_PASSWORD: "snipsnap"
-      HTTP_USERNAME: "admin"
     env_file:
       - "${HOME}/secrets/.cc_env"
     security_opt:
@@ -37,8 +33,6 @@ services:
       - ${HOME}/secrets/silicon_sampling_deploy_key:/home/claude/.ssh
     entrypoint: ["claude"]
     command: ["--dangerously-skip-permissions"]
-    depends_on:
-      - docker-proxy
     networks:
       - cc_connection
 
@@ -48,7 +42,7 @@ services:
       CC_MAX_JOBS: "4"
       CC_HOST: "0.0.0.0"
       CC_PORT: "8765"
-      CC_PROJECT: "social_deduction"
+      CC_PROJECT: "silicon_sampling"
       PATH: "/app/CC_command_server/scripts:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
       HTTP_PASSWORD: "snipsnap"
       PLAYER_SERVER_URL: "http://sh_player:5000"
