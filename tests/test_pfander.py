@@ -49,13 +49,43 @@ def test_int_parsing():
     assert slot.parse("100") == 100
     assert slot.parse(" 42%") == 42
     assert slot.parse("101") is None
-    assert slot.parse("78.5") is None, "a decimal must not be truncated to an integer"
-    assert slot.parse("1,200") is None
+    # A slider is a continuous control the survey snaps to an integer, so a
+    # decimal is a real position and is rounded rather than refused.
+    assert slot.parse("78.5") == 79
+    assert slot.parse("92.36") == 92
+    assert slot.parse("100.4") == 100
+    assert slot.parse("1,200") is None, "out of range once the separator is read"
     assert slot.parse("7 (somewhat)") is None
     assert slot.parse("many") is None
     money = IntSlot(id="d", lo=0, hi=10, allow_dollar=True)
     assert money.parse("$7") == 7
     assert money.parse("$11") is None
+
+
+def test_money_options_tolerate_reformatting():
+    """The model retypes money; the same answer must not be rejected for it.
+
+    Rejecting these is not merely lossy — the failure rate depends on which
+    option was meant, so rejection sampling turns it into a skewed distribution.
+    """
+    slot = ChoiceSlot(
+        id="income",
+        options=(
+            "Less than $30,000",
+            "$30,000 to $55,999",
+            "$56,000 to $99,999",
+            "$100,000 to $167,999",
+            "$168,000 or more",
+        ),
+    )
+    assert slot.parse("$56,000 to $99,999") == "$56,000 to $99,999"
+    assert slot.parse("56,000 to $99,999") == "$56,000 to $99,999"
+    assert slot.parse("100,000 to $167,999") == "$100,000 to $167,999"
+    assert slot.parse("30000 to 55999") == "$30,000 to $55,999"
+    assert slot.parse("168000 or more") == "$168,000 or more"
+    assert slot.parse("Less than 30000") == "Less than $30,000"
+    # Still not a licence to accept trailing prose.
+    assert slot.parse("$56,000 to $99,999 and rising") is None
 
 
 def test_pattern_parsing():
@@ -83,7 +113,12 @@ def test_ols_matches_hand_computed_hc1():
 def test_multiplicity_adjustments():
     raw = [0.001, 0.02, 0.03, 0.5]
     assert [round(value, 4) for value in holm(raw)] == [0.004, 0.06, 0.06, 0.5]
-    assert [round(value, 4) for value in benjamini_hochberg(raw)] == [0.004, 0.04, 0.04, 0.5]
+    assert [round(value, 4) for value in benjamini_hochberg(raw)] == [
+        0.004,
+        0.04,
+        0.04,
+        0.5,
+    ]
     # Both are monotone in the raw p-values and never shrink them.
     for adjusted in (holm(raw), benjamini_hochberg(raw)):
         assert all(a >= b for a, b in zip(adjusted, raw))
@@ -96,7 +131,13 @@ def test_profiles_reproduce_the_preregistered_quotas():
     for band, total, male, female in profiles.AGE_QUOTA:
         got = sum(1 for p in built if p.age_band == band)
         assert abs(got - total) <= 3, f"{band}: {got} vs {total}"
-        assert abs(sum(1 for p in built if p.age_band == band and p.gender == "Male") - male) <= 3
+        assert (
+            abs(
+                sum(1 for p in built if p.age_band == band and p.gender == "Male")
+                - male
+            )
+            <= 3
+        )
 
     for race, total, male, female in profiles.RACE_QUOTA:
         got = sum(1 for p in built if p.race == race)
@@ -106,7 +147,11 @@ def test_profiles_reproduce_the_preregistered_quotas():
     for profile in built:
         counts[profile.condition] = counts.get(profile.condition, 0) + 1
     assert counts["control"] == profiles.CONTROL_N
-    assert all(counts[title] == profiles.PER_INTERVENTION_N for title in counts if title != "control")
+    assert all(
+        counts[title] == profiles.PER_INTERVENTION_N
+        for title in counts
+        if title != "control"
+    )
 
     # Same seed, same sample.
     again = profiles.build()
@@ -127,7 +172,11 @@ def test_state_to_case_mapping_is_total_and_disjoint():
 
     assert len(STATES) == 51
     cases = [case_for_state(state) for state in STATES]
-    assert set(cases) == {1, 2, 3}, "every state must map to a real case, never the fallback"
+    assert set(cases) == {
+        1,
+        2,
+        3,
+    }, "every state must map to a real case, never the fallback"
     assert case_for_state("Prefer not to say") == 4
     assert case_for_state(None) == 4
 
@@ -138,10 +187,14 @@ def test_instrument_validates():
 
 def test_every_condition_yields_every_outcome():
     for condition in CONDITIONS:
-        session = make_session("p00001", condition, code_name=template_code_name(condition))
+        session = make_session(
+            "p00001", condition, code_name=template_code_name(condition)
+        )
         while (step := session.next_prompt()) is not None:
             text, slot = step
-            assert not MARKER_RE.search(text), f"{condition}/{slot.id}: marker leaked into the prompt"
+            assert not MARKER_RE.search(
+                text
+            ), f"{condition}/{slot.id}: marker leaked into the prompt"
             assert text.endswith("Response: ")
             session.submit(slot, validate._dummy(slot))
         computed = outcomes.compute(session.answers)
@@ -156,12 +209,23 @@ def test_composites_follow_the_codebook():
     answers.update({item: 40 for item in outcomes.SUBSCALES["trust_openness"]})
     answers["funding_5"] = 70
     answers["newsletter"] = "Yes"
-    answers.update({"gender": "Male", "year_birth": 1990, "race": "White / Caucasian", "education": "Bachelor's degree", "income": "$168,000 or more", "party": "Democrat"})
+    answers.update(
+        {
+            "gender": "Male",
+            "year_birth": 1990,
+            "race": "White / Caucasian",
+            "education": "Bachelor's degree",
+            "income": "$168,000 or more",
+            "party": "Democrat",
+        }
+    )
 
     computed = outcomes.compute(answers)
     # Mean of the four subscale means, per the codebook — not the mean of 12 items.
     assert computed["trust_multidimensional"] == 25.0
-    assert computed["funding_perceptions"] == 30.0, "higher must mean 'supports more funding'"
+    assert (
+        computed["funding_perceptions"] == 30.0
+    ), "higher must mean 'supports more funding'"
     assert computed["newsletter_signup"] == 1
     assert computed["age_band"] == "30-44"
 
@@ -177,17 +241,31 @@ def test_templates_declare_every_slot():
             assert slot["legal"], f"{condition}/{slot['id']}: no legal-value spec"
         text = (templates.TEMPLATES / info["file"]).read_text(encoding="utf-8")
         for slot in info["slots"]:
-            assert f"<<{slot['id']} ::" in text, f"{condition}: {slot['id']} missing from the template file"
+            assert (
+                f"<<{slot['id']} ::" in text
+            ), f"{condition}: {slot['id']} missing from the template file"
 
 
 def test_prefilled_slots_are_exactly_the_intended_ones():
     slots = slot_manifest(templates.template_elements("control"))
     prefilled = {slot["id"] for slot in slots if slot["source"] == "prefilled"}
-    assert prefilled == {"filter", "filter_ai", "gender", "year_birth", "race", "attention1", "attention2"}
+    assert prefilled == {
+        "filter",
+        "filter_ai",
+        "gender",
+        "year_birth",
+        "race",
+        "attention1",
+        "attention2",
+    }
 
 
 def main() -> int:
-    tests = [value for name, value in sorted(globals().items()) if name.startswith("test_") and callable(value)]
+    tests = [
+        value
+        for name, value in sorted(globals().items())
+        if name.startswith("test_") and callable(value)
+    ]
     failures = 0
     for test in tests:
         try:

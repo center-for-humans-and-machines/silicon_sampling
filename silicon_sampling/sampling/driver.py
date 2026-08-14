@@ -57,7 +57,7 @@ class SamplerConfig:
     #: How many times to re-issue a call whose draws were all illegal.
     max_rounds: int = 4
     #: After that, fall back to grammar-constrained decoding for that one slot.
-    use_guided_fallback: bool = True
+    use_structured_fallback: bool = True
     #: Sessions stepped in lockstep.  Bounded by KV cache capacity, not by VRAM.
     group_size: int = 24
     #: Per-slot token budgets, from :func:`token_budget`.  Empty means use each
@@ -75,7 +75,7 @@ class DrawLog:
     calls: int = 0
     draws: int = 0
     rejected: int = 0
-    guided_fallbacks: int = 0
+    structured_fallbacks: int = 0
     forced: int = 0
     seconds: float = 0.0
     rejected_by_slot: dict = field(default_factory=dict)
@@ -89,7 +89,7 @@ class DrawLog:
         self.calls += other.calls
         self.draws += other.draws
         self.rejected += other.rejected
-        self.guided_fallbacks += other.guided_fallbacks
+        self.structured_fallbacks += other.structured_fallbacks
         self.forced += other.forced
         self.seconds += other.seconds
         for slot_id, count in other.rejected_by_slot.items():
@@ -99,16 +99,16 @@ class DrawLog:
         self.fallback_slots += other.fallback_slots
 
 
-def guided_for(engine: VLLMEngine, slot: Slot):
+def structured_for(engine: VLLMEngine, slot: Slot):
     """A grammar that can only emit legal answers, for the last-resort path."""
     if isinstance(slot, ChoiceSlot):
-        return engine.guided_choice(list(slot.options))
+        return engine.structured_choice(list(slot.options))
     if isinstance(slot, IntSlot):
-        return engine.guided_regex(
+        return engine.structured_regex(
             "|".join(str(value) for value in range(slot.lo, slot.hi + 1))
         )
     if isinstance(slot, FreeTextSlot) and slot.pattern:
-        return engine.guided_regex(slot.pattern)
+        return engine.structured_regex(slot.pattern)
     return None
 
 
@@ -172,12 +172,12 @@ def run_group(
             pending = still
 
         # Anything still unresolved gets a grammar that cannot go wrong.
-        if pending and config.use_guided_fallback:
+        if pending and config.use_structured_fallback:
             params = []
             usable = []
             for index, session, slot, prompt in pending:
-                guided = guided_for(engine, slot)
-                if guided is None:
+                structured = structured_for(engine, slot)
+                if structured is None:
                     continue
                 usable.append((index, session, slot, prompt))
                 params.append(
@@ -185,13 +185,13 @@ def run_group(
                         max_tokens=config.tokens_for(slot),
                         n=1,
                         seed=seeds[index] + step,
-                        guided=guided,
+                        structured=structured,
                     )
                 )
             if usable:
                 results = engine.generate([prompt for *_, prompt in usable], params)
                 log.calls += len(usable)
-                log.guided_fallbacks += len(usable)
+                log.structured_fallbacks += len(usable)
                 resolved = set()
                 for (index, session, slot, _), draws in zip(usable, results):
                     value, rejected = _first_legal(slot, draws)

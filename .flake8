@@ -1,0 +1,3 @@
+[flake8]
+# data/ holds inputs and generated artifacts (transcripts, caches), never source.
+exclude = .git,__pycache__,data,build,dist

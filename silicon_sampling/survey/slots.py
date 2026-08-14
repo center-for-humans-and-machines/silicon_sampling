@@ -30,6 +30,15 @@ def _clip(raw: str) -> str:
     return raw.split("\n", 1)[0].strip()
 
 
+#: Cosmetic characters in money-shaped options that a respondent may drop.
+_DECORATION = str.maketrans("", "", "$,")
+
+
+def _decorate(text: str) -> str:
+    """Strip currency symbols and thousands separators."""
+    return text.translate(_DECORATION)
+
+
 def _trailing_ok(rest: str) -> bool:
     """Is what follows the matched answer merely punctuation?
 
@@ -107,16 +116,49 @@ class ChoiceSlot(Slot):
             return self.describe_as
         return "Options: " + " | ".join(self.options)
 
+    @staticmethod
+    def _match(text: str, pairs: Sequence[tuple[str, str]]):
+        """Longest-prefix match of ``text`` against ``(spelling, option)`` pairs.
+
+        Longest first, so "Master's degree / Professional degree" wins over any
+        option that happens to be a prefix of it.
+        """
+        low = text.lower()
+        for spelling, option in sorted(
+            pairs, key=lambda pair: len(pair[0]), reverse=True
+        ):
+            if (
+                spelling
+                and low.startswith(spelling.lower())
+                and _trailing_ok(text[len(spelling) :])
+            ):
+                return option
+        return None
+
     def parse(self, raw: str):
         text = _clip(raw)
         if not text:
             return None
-        low = text.lower()
-        # Longest match first, so "Master's degree / Professional degree" wins
-        # over any option that happens to be a prefix of it.
-        for option in sorted(self.options, key=len, reverse=True):
-            if low.startswith(option.lower()) and _trailing_ok(text[len(option) :]):
-                return option
+
+        matched = self._match(text, [(option, option) for option in self.options])
+        if matched is not None:
+            return matched
+
+        # The model reliably reformats money — "100,000 to $167,999" or
+        # "30000 to 55999" for "$30,000 to $55,999" — dropping currency symbols
+        # and thousands separators. That is not a hedge or a different answer, it
+        # is the same answer typed the way people type money, and rejecting it
+        # does real damage: the failure rate is *option-dependent*. On the income
+        # item it ran from 3% for the one option beginning with a word to 58% for
+        # the ones beginning with "$", and rejection sampling turns any such
+        # asymmetry straight into a skewed distribution. Comparing with the
+        # cosmetics removed on both sides fixes it; the guard below refuses to do
+        # so if it would make two options indistinguishable.
+        spellings = [(_decorate(option), option) for option in self.options]
+        if len({spelling for spelling, _ in spellings}) < len(self.options):
+            return None
+        if any(spelling != option for spelling, option in spellings):
+            return self._match(_decorate(text), spellings)
         return None
 
 
@@ -156,18 +198,36 @@ class IntSlot(Slot):
         if not match:
             return None
         rest = text[match.end() :]
-        # "78.5" and "1,200" are not integers in range; refuse rather than
-        # silently truncating them to 78 and 1.
-        if rest[:1] in {".", ","} and rest[1:2].isdigit():
-            return None
+        whole = match.group()
+
+        # A slider is a continuous control that the survey records as an integer,
+        # so "92.36" is a real position, not a malformed answer: round it the way
+        # the instrument would. Refusing decimals instead would reject an
+        # answer the model *did* give, and do so more often at some scale
+        # positions than others.
+        value = float(whole)
+        if rest[:1] == "." and rest[1:2].isdigit():
+            fraction = re.match(r"\.\d+", rest)
+            value = float(whole + fraction.group())
+            rest = rest[fraction.end() :]
+        elif rest[:1] == "," and rest[1:2].isdigit():
+            # "1,200" is a thousands separator, not a decimal: read it as 1200,
+            # which then fails the range check on its own merits.
+            group = re.match(r"(?:,\d{3})+", rest)
+            if group:
+                value = float(whole + group.group().replace(",", ""))
+                rest = rest[group.end() :]
+            else:
+                return None
+
         if self.allow_percent and rest[:1] == "%":
             rest = rest[1:]
         if not _trailing_ok(rest):
             return None
-        value = int(match.group())
-        if not self.lo <= value <= self.hi:
+        rounded = int(value + 0.5)
+        if not self.lo <= rounded <= self.hi:
             return None
-        return value
+        return rounded
 
 
 @dataclass(frozen=True)

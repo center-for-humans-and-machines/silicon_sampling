@@ -76,6 +76,48 @@ def fit_token_budgets(model: str) -> dict[str, int]:
     }
 
 
+def max_transcript_tokens(model: str) -> int:
+    """Length of the longest transcript any respondent can produce.
+
+    This is what a session must hold in the KV cache for its whole life, so it
+    sets how many sessions can run concurrently.  Measured by walking every
+    condition to completion with the widest legal answer in every slot, then
+    tokenising — cheap, and it needs no GPU.
+    """
+    from transformers import AutoTokenizer
+
+    from ..survey.slots import ChoiceSlot, FreeTextSlot, IntSlot
+
+    tokenizer = AutoTokenizer.from_pretrained(model)
+
+    def widest(slot):
+        if isinstance(slot, ChoiceSlot):
+            return max(slot.options, key=len)
+        if isinstance(slot, IntSlot):
+            return max((slot.lo, slot.hi), key=lambda value: len(str(value)))
+        if isinstance(slot, FreeTextSlot):
+            # The comment box is the only unbounded slot.  Real prose tokenises
+            # denser than a run of identical characters, so a placeholder here
+            # *understates* the length — hence the margin applied below.
+            return "x " * min(slot.max_chars // 2, slot.max_tokens)
+        return ""  # pragma: no cover - every slot type is covered above
+
+    longest = 0
+    for condition in templates.conditions.CONDITIONS:
+        session = build.make_session(
+            "p00000", condition, code_name=build.template_code_name(condition)
+        )
+        while (step := session.next_prompt()) is not None:
+            session.submit(step[1], widest(step[1]))
+        longest = max(
+            longest,
+            len(tokenizer(session.transcript(), add_special_tokens=False)["input_ids"]),
+        )
+    # Margin for the free-text slot, whose real output tokenises denser than the
+    # placeholder above: measured transcripts ran ~1% past the unpadded figure.
+    return int(longest * 1.05)
+
+
 def completed(answers_path: Path) -> set[str]:
     """Ids already written, so a restart can skip them."""
     if not answers_path.exists():
@@ -188,7 +230,20 @@ class Runner:
             self._answers, self._draws = answers, draws
             with VLLMEngine(self.engine_config) as engine:
                 cache = engine.kv_cache_tokens()
-                print(f"[run] KV cache: {cache} tokens; group size {size}")
+                if size <= 0:
+                    # Size the group to the cache the engine actually got, so the
+                    # working set fills it without spilling. Every session must
+                    # keep its whole transcript resident for its entire life; one
+                    # eviction costs a full re-prefill on the next step.
+                    per_session = max_transcript_tokens(self.engine_config.model)
+                    size = engine.group_size_for(per_session)
+                    self.sampler_config.group_size = size
+                    print(
+                        f"[run] longest transcript {per_session} tokens -> auto group size {size}"
+                    )
+                print(
+                    f"[run] KV cache: {cache} tokens; group size {size}; concurrent sequences {size * self.sampler_config.draws_per_call}"
+                )
                 # Sessions are built one group at a time: holding 18,000 of them
                 # at once costs hundreds of MB for no benefit.
                 for start in range(0, len(todo), size):
@@ -236,7 +291,7 @@ class Runner:
                 "rejection_rate": (
                     round(log.rejected / log.draws, 5) if log.draws else None
                 ),
-                "guided_fallbacks": log.guided_fallbacks,
+                "structured_fallbacks": log.structured_fallbacks,
                 "forced": log.forced,
                 "worst_slots": sorted(
                     log.rejected_by_slot.items(), key=lambda item: -item[1]

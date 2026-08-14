@@ -7,12 +7,13 @@
 # costs at most the group that was in flight plus one model load.
 #
 # Usage: scripts/run_full_sample.sh [target_n] [group_size]
+#   group_size 0 (the default) sizes the group to the KV cache the engine gets.
 
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET="${1:-18000}"
-GROUP="${2:-16}"
+GROUP="${2:-0}"
 OUT="$ROOT/data/pfander/silicon_sampling/qwen25_7b"
 LOG="$OUT/sample.log"
 
@@ -33,7 +34,7 @@ for attempt in $(seq 1 40); do
     pkill -9 -f 'VLLM::EngineCore' 2>/dev/null
     sleep 5
 
-    python -m silicon_sampling.pfander.cli sample --group-size "$GROUP" --gpu-memory-utilization 0.93 >> "$LOG" 2>&1
+    python -m silicon_sampling.pfander.cli sample --group-size "$GROUP" --gpu-memory-utilization 0.96 >> "$LOG" 2>&1
     status=$?
     echo "[wrapper] attempt $attempt exited $status" | tee -a "$LOG"
     sleep 10

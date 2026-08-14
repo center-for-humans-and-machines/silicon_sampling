@@ -37,11 +37,29 @@ DRAWS_JSONL = SAMPLES / "draws.jsonl"
 RUN_META = SAMPLES / "run_meta.json"
 PROFILES_CSV = SAMPLES / "profiles.csv"
 
-#: Writable caches.  ``/home/claude/.cache`` is root-owned in this container, so
-#: vLLM cannot store its compiled graphs there and would recompile the model —
-#: about fifteen minutes — on *every* engine start.  A run that restarts often
-#: cannot afford that, so the caches live under the (git-ignored) data tree.
-CACHE = DATA.parent / ".cache"
+
+def _cache_root() -> Path:
+    """Where vLLM and matplotlib may write.
+
+    Compiled CUDA graphs must persist across restarts — recompiling costs minutes
+    on every engine start, which a restartable run cannot afford — so this wants a
+    writable path outside the repository. ``~/.cache`` is the natural home and is
+    mounted from the host here; if it is not writable (it was root-owned in an
+    earlier build of this image) fall back to the git-ignored data tree.
+    """
+    home = Path.home() / ".cache" / "silicon_sampling"
+    try:
+        home.mkdir(parents=True, exist_ok=True)
+        probe = home / ".writable"
+        probe.touch()
+        probe.unlink()
+        return home
+    except OSError:
+        return DATA.parent / ".cache"
+
+
+#: Writable cache root for compiled graphs and plotting fonts.
+CACHE = _cache_root()
 
 #: Analysis output.
 REPORT = DOCS / "reports" / "pfander_silicon_sample"

@@ -3,7 +3,7 @@
 python -m silicon_sampling.pfander.cli render-templates
 python -m silicon_sampling.pfander.cli validate
 python -m silicon_sampling.pfander.cli build-profiles
-python -m silicon_sampling.pfander.cli sample --limit 64 --group-size 24
+python -m silicon_sampling.pfander.cli sample            # group size auto-fits the KV cache
 python -m silicon_sampling.pfander.cli build-csv
 """
 
@@ -60,18 +60,24 @@ def main(argv: list[str] | None = None) -> int:
         default=0,
         help="pilot on this many respondents, stratified by condition",
     )
-    sample.add_argument("--group-size", type=int, default=24)
+    sample.add_argument(
+        "--group-size",
+        type=int,
+        default=0,
+        help="0 = size it automatically from the KV cache the engine gets",
+    )
     sample.add_argument("--draws-per-call", type=int, default=4)
     sample.add_argument("--model", default=EngineConfig.model)
     sample.add_argument("--kv-cache-dtype", default="auto", choices=["auto", "fp8"])
     sample.add_argument("--max-model-len", type=int, default=8192)
-    sample.add_argument("--gpu-memory-utilization", type=float, default=0.90)
+    sample.add_argument("--gpu-memory-utilization", type=float, default=0.92)
+    sample.add_argument("--max-num-seqs", type=int, default=512)
     sample.add_argument(
-        "--compile",
+        "--eager",
         dest="enforce_eager",
-        action="store_false",
-        default=True,
-        help="use torch.compile + CUDA graphs (slower startup)",
+        action="store_true",
+        default=False,
+        help="disable torch.compile + CUDA graphs (faster startup, much slower decode)",
     )
     sample.add_argument("--no-resume", action="store_true")
 
@@ -79,6 +85,19 @@ def main(argv: list[str] | None = None) -> int:
         "build-csv", help="answers.jsonl -> samples.csv + tier1_submission.csv"
     )
     csv_cmd.add_argument("--out", default=None)
+
+    stats_cmd = sub.add_parser(
+        "stats", help="live throughput and illegal-generation rate of a run"
+    )
+    stats_cmd.add_argument("--out", default=None)
+    stats_cmd.add_argument(
+        "--window",
+        type=float,
+        default=120.0,
+        help="seconds to watch the answer log for an instantaneous rate",
+    )
+    stats_cmd.add_argument("--model", default=EngineConfig.model)
+    stats_cmd.add_argument("--json", action="store_true")
 
     args = parser.parse_args(argv)
 
@@ -111,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
                 gpu_memory_utilization=args.gpu_memory_utilization,
                 kv_cache_dtype=args.kv_cache_dtype,
                 enforce_eager=args.enforce_eager,
+                max_num_seqs=args.max_num_seqs,
             ),
             SamplerConfig(
                 group_size=args.group_size, draws_per_call=args.draws_per_call
@@ -125,6 +145,20 @@ def main(argv: list[str] | None = None) -> int:
         out = Path(args.out) if args.out else paths.SAMPLES
         summary = build_csvs(out)
         print(summary)
+        return 0
+
+    if args.command == "stats":
+        import json as _json
+
+        from ..sampling.engine import configure_runtime
+
+        configure_runtime(paths.CACHE)
+
+        from .stats import format_report, report
+
+        out = Path(args.out) if args.out else paths.SAMPLES
+        result = report(out, model=args.model, window=args.window)
+        print(_json.dumps(result, indent=2) if args.json else format_report(result))
         return 0
 
     return 1  # pragma: no cover

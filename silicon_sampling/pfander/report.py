@@ -569,7 +569,7 @@ What the sampler actually did, and where it had to intervene.
 
 ## The run
 
-{md_table(pd.DataFrame([{ "key": key, "value": str(value)} for key, value in meta.items() if not isinstance(value, (dict, list))]))}
+{md_table(pd.DataFrame([{"key": key, "value": str(value)} for key, value in meta.items() if not isinstance(value, (dict, list))]))}
 
 ## Rejection sampling
 
@@ -582,7 +582,7 @@ nothing in faithfulness, only in tokens.
 - calls: **{draws.get('calls', 0):,}**
 - draws: **{draws.get('draws', 0):,}**
 - rejected: **{draws.get('rejected', 0):,}** ({(draws.get('rejection_rate') or 0):.2%})
-- grammar-constrained fallbacks: **{draws.get('guided_fallbacks', 0):,}**
+- grammar-constrained fallbacks: **{draws.get('structured_fallbacks', 0):,}**
 - forced defaults: **{draws.get('forced', 0):,}**
 
 A grammar-constrained fallback means the model failed to produce a legal answer

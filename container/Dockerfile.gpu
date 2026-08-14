@@ -1,13 +1,22 @@
 # syntax=docker/dockerfile:1.6
 # GPU Docker image for `silicon_sampling` on a single NVIDIA GeForce RTX 4090.
 #
-# This mirrors `container/Dockerfile` where possible, but keeps CUDA/GPU
-# packages installed. CUDA 12.8 + PyTorch cu128 supports Ada Lovelace GPUs
-# such as the RTX 4090 (compute capability 8.9). FlashInfer is intentionally
-# excluded because this local GPU image does not need it.
+# Same inference stack as social_deduction_llm/container/message_annotation_glm52.def
+# (vLLM 0.23.0 + Transformers 5.12.1), but the CUDA 12.9 image instead of the
+# default CUDA 13 `vllm/vllm-openai:v0.23.0` used on H200/B200.
+#
+# Official image facts (v0.23.0-cu129):
+#   CUDA 12.9.1, Python 3.12, FlashInfer 0.6.12
+#   torch_cuda_arch_list includes 8.9 (Ada / RTX 4090)
+#   opencv-python-headless 4.13+ requires numpy>=2 on Python >=3.9
+#
+# Host NVIDIA driver must be >= 575.51 (CUDA 12.9). GeForce cannot use CUDA
+# forward-compat. Stock vLLM GLM-5.2 DSA kernels remain Hopper/Blackwell-only;
+# this stack serves other new models that fit in 24 GB.
 
-FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04
+FROM vllm/vllm-openai:v0.23.0-cu129
 
+USER root
 
 ARG DEBIAN_FRONTEND=noninteractive
 ENV PIP_NO_CACHE_DIR=1 \
@@ -23,7 +32,10 @@ ENV PIP_NO_CACHE_DIR=1 \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility \
     TORCH_CUDA_ARCH_LIST=8.9
 
-# -------- system packages --------------------------------------------------
+# Official image ENTRYPOINT is `vllm serve`; this is a workstation image.
+ENTRYPOINT []
+
+# -------- system packages / Claude helper CLIs -----------------------------
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates curl git gnupg openssh-client \
@@ -31,29 +43,17 @@ RUN apt-get update \
         libopenblas-dev libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
         libnuma-dev libaio-dev \
         locales \
-        python3 python3-dev python3-venv python3-distutils \
-    && curl -sS https://bootstrap.pypa.io/get-pip.py | python3 \
-    && update-alternatives --install /usr/bin/python python /usr/bin/python3 1 \
-    && locale-gen en_US.UTF-8 \
-    && rm -rf /var/lib/apt/lists/*
-
-# -------- Claude Code / agent helper CLIs ----------------------------------
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        jq \
-        ripgrep fd-find \
+        jq ripgrep fd-find \
         tree file xxd \
         unzip zip xz-utils \
         procps lsof \
         sqlite3 \
     && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3 1 \
+    && locale-gen en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
 # -------- Node.js 22 + Claude Code CLI -------------------------------------
-# Claude Code's npm package requires Node.js >= 22 (engines field as of
-# v2.1.198+). Install @latest so each uncached rebuild pulls the newest
-# release. Pass `--build-arg CLAUDE_CODE_CACHEBUST=$(date +%s)` to force a
-# reinstall when Docker would otherwise reuse a cached older layer.
 ARG CLAUDE_CODE_CACHEBUST=1
 RUN echo "claude-code cachebust=${CLAUDE_CODE_CACHEBUST}" \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
@@ -62,96 +62,73 @@ RUN echo "claude-code cachebust=${CLAUDE_CODE_CACHEBUST}" \
     && claude --version \
     && rm -rf /var/lib/apt/lists/* /root/.npm
 
-# -------- pip / uv ---------------------------------------------------------
-RUN python3 -m pip install --upgrade pip setuptools wheel \
-    && python3 -m pip install "uv==0.10.2"
-
-# -------- frozen requirements (keep COPY minimal so source edits stay cached)
-COPY container/requirements.filtered.txt /opt/requirements.filtered.txt
-
-# -------- keep GPU deps, skip only FlashInfer ------------------------------
-RUN set -e; \
-    grep -vE '^(flashinfer-cubin|flashinfer-python)(==|$)' \
-         /opt/requirements.filtered.txt > /opt/requirements.gpu.txt; \
-    echo "--- filtered out (FlashInfer only) ---"; \
-    diff /opt/requirements.filtered.txt /opt/requirements.gpu.txt || true
-
-# -------- install CUDA PyTorch first to pin cu128 versions -----------------
+# -------- Transformers 5.12.1 (same overlay as message_annotation_glm52.def)
 RUN uv pip install --system --index-strategy unsafe-best-match \
-        --extra-index-url https://download.pytorch.org/whl/cu128 \
-        "torch==2.8.0+cu128" \
-        "torchvision==0.23.0+cu128" \
-        "torchaudio==2.8.0+cu128"
+        "transformers==5.12.1" \
+        "huggingface-hub>=1.5,<2"
 
-# -------- install the main pinned requirement set --------------------------
-# Same `--no-deps` strategy as the Singularity build: the snapshot already has
-# every transitive dep pinned, and the resolver would otherwise choke on the
-# same trl-0.28 vs datasets-2.16 conflict.
-RUN uv pip install --system --no-deps --index-strategy unsafe-best-match \
-        --extra-index-url https://download.pytorch.org/whl/cu128 \
+# -------- extra workstation packages ---------------------------------------
+COPY container/requirements.filtered.txt /opt/requirements.filtered.txt
+# `--no-deps` so leftover pins cannot downgrade the official vLLM stack.
+# Inference-stack names are stripped even if they reappear in the extras file.
+RUN set -e; \
+    grep -vE '^(#|$)' /opt/requirements.filtered.txt \
+      | grep -vE '^(vllm|torch|torchvision|torchaudio|triton|transformers|huggingface[_-]hub|tokenizers|numpy|opencv-python-headless|flashinfer-cubin|flashinfer-python|xformers|compressed-tensors|outlines_core|xgrammar|lm-format-enforcer|llguidance|apache-tvm-ffi|depyf|openai-harmony|gguf|mistral_common|numba|llvmlite|protobuf|nvidia-.+|cuda-bindings|cuda-pathfinder|cuda-python|cupy-cuda12x|tilelang|fastsafetensors|quack-kernels|tokenspeed-mla|humming-kernels|flash_attn|flash-attn|bitsandbytes)(==|$|\[)' \
+      > /opt/requirements.gpu.txt; \
+    echo "--- extras after stripping inference stack ---"; \
+    wc -l /opt/requirements.gpu.txt; \
+    uv pip install --system --no-deps --index-strategy unsafe-best-match \
         -r /opt/requirements.gpu.txt
 
-# -------- flash-attn: prebuilt wheel matching torch 2.8 + cu12 + cp310 -----
-RUN uv pip install --system --no-deps --index-strategy unsafe-best-match \
-        "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp310-cp310-linux_x86_64.whl"
-
-# -------- first-party / utility packages published to PyPI -----------------
-RUN uv pip install --system --no-deps "ykutil"
-
-# -------- black and flake8 for code formatting and linting ------------------
-RUN uv pip install --system black flake8
+RUN uv pip install --system --no-deps "ykutil" \
+    && uv pip install --system black flake8
 
 # -------- bson / pymongo collision fix -------------------------------------
 RUN python3 -m pip uninstall -y bson || true \
     && python3 -m pip install --no-deps --force-reinstall --no-cache-dir pymongo==4.16.0
 
-# -------- first-party source (after pip stack; order least->most volatile for cache)
+# -------- first-party source -----------------------------------------------
 COPY pyproject.toml                      /opt/silicon_sampling/pyproject.toml
 COPY README.md                           /opt/silicon_sampling/README.md
 COPY silicon_sampling                       /opt/silicon_sampling/silicon_sampling
 
 RUN uv pip install --system --no-deps -e /opt/silicon_sampling
 
-# -------- quick GPU-stack import sanity check ------------------------------
+# -------- import sanity check (torch/vLLM already consistent in the base image)
 RUN python3 - <<'PY'
 import importlib
+import importlib.metadata as metadata
 
 mods = (
     "torch", "torchvision", "torchaudio",
-    "transformers", "datasets", "accelerate", "peft", "trl",
-    "deepspeed", "flash_attn", "xformers",
-    "silicon_sampling",
-    "ykutil",
+    "transformers", "datasets", "accelerate", "peft",
+    "flashinfer", "silicon_sampling", "ykutil",
 )
-# vllm import can eagerly initialize CUDA; leave that for runtime with a GPU.
 for m in mods:
-    try:
-        importlib.import_module(m)
-        print(f"[ok] import {m}")
-    except Exception as e:
-        print(f"[WARN] import {m} failed: {type(e).__name__}: {e}")
+    importlib.import_module(m)
+    print(f"[ok] import {m}")
 
 import torch
 print(f"torch {torch.__version__}  cuda_build={torch.version.cuda}  is_available={torch.cuda.is_available()}")
+print(
+    f"vllm {metadata.version('vllm')}  "
+    f"transformers {metadata.version('transformers')}  "
+    f"huggingface-hub {metadata.version('huggingface-hub')}  "
+    f"numpy {metadata.version('numpy')}"
+)
 
 from bson import SON  # noqa: F401
 import pymongo
 print(f"pymongo {pymongo.__version__} OK; SON from {SON.__module__}")
 PY
 
-# -------- shrink image -----------------------------------------------------
 RUN apt-get clean \
     && rm -rf /var/lib/apt/lists/* /root/.cache /root/.cargo /root/.rustup \
-    && rm -rf /opt/silicon_sampling/silicon_sampling/__pycache__ \
-              /opt/silicon_sampling/silicon_sampling/__pycache__ || true \
     && find /usr -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
-# Sensible cache defaults; override at `docker run` time if persistence is
-# needed (e.g. -e HF_HOME=/workspace/hf -v $PWD/hf:/workspace/hf).
 ENV HF_HOME=/tmp/hf_home \
     TRITON_CACHE_DIR=/tmp/triton_cache \
-    TORCH_EXTENSIONS_DIR=/tmp/torch_extensions \
-    LD_LIBRARY_PATH="/usr/local/lib/python3.10/dist-packages/nvidia/cuda_runtime/lib:/usr/local/lib/python3.10/dist-packages/nvidia/cublas/lib:/usr/local/lib/python3.10/dist-packages/nvidia/cudnn/lib:${LD_LIBRARY_PATH}"
+    TORCH_EXTENSIONS_DIR=/tmp/torch_extensions
 
 ARG USER_ID=1000
 ARG GROUP_ID=1000
@@ -167,7 +144,7 @@ RUN set -eux; \
         usermod -d /home/claude -m "${existing_user}" || true; \
         usermod -l claude "${existing_user}" || true; \
     fi; \
-    mkdir -p /home/claude /workspace /opt/silicon_sampling; \
+    mkdir -p /home/claude /home/claude/.cache /workspace /opt/silicon_sampling; \
     chown -R "${USER_ID}:${GROUP_ID}" /home/claude /workspace; \
     chown -R "${USER_ID}:${GROUP_ID}" /opt/silicon_sampling
 
@@ -180,8 +157,8 @@ COPY container/.gitconfig /home/claude/.gitconfig
 WORKDIR /opt/silicon_sampling
 
 LABEL org.opencontainers.image.title="silicon_sampling-gpu-rtx4090" \
-      org.opencontainers.image.description="GPU Docker image for silicon_sampling on NVIDIA GeForce RTX 4090 (with Claude Code CLI)" \
+      org.opencontainers.image.description="GPU Docker image for silicon_sampling on RTX 4090 (vllm/vllm-openai:v0.23.0-cu129 + Transformers 5.12.1)" \
       org.opencontainers.image.authors="Yannik Keller <ykeller@mpib-berlin.mpg.de>" \
-      org.opencontainers.image.version="0.1.0"
+      org.opencontainers.image.version="0.2.0"
 
 CMD ["python3"]

@@ -18,10 +18,9 @@ from pathlib import Path
 
 # ``/home/claude/.cache`` is root-owned in this container, so matplotlib falls back
 # to a fresh temp dir on every import and says so, loudly.
-os.environ.setdefault(
-    "MPLCONFIGDIR",
-    str(Path(__file__).resolve().parents[2] / "data" / ".cache" / "matplotlib"),
-)
+from ..pfander.paths import CACHE  # noqa: E402
+
+os.environ.setdefault("MPLCONFIGDIR", str(CACHE / "matplotlib"))
 Path(os.environ["MPLCONFIGDIR"]).mkdir(parents=True, exist_ok=True)
 
 import matplotlib  # noqa: E402
