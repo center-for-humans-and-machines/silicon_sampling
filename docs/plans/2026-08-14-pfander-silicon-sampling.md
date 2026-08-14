@@ -245,7 +245,45 @@ rejection sampling from the model's distribution restricted to the legal set.
 > path; the renormalisation path is not implemented unless the pilot shows the
 > rejection loop is the bottleneck.
 
-### What the calibration actually measured (2026-08-14)
+### Re-tuning after the environment rebuild (vLLM 0.23, same GPU)
+
+The container was rebuilt mid-project with vLLM 0.23 / torch 2.11. Ported the
+engine (`guided_decoding` → `structured_outputs`, several `LLM()` keywords became
+engine-arg passthroughs) and re-measured everything. Four configurations,
+85–102 respondents each, all 17 arms:
+
+| config | KV cache | group | steady rate | illegal draws |
+| --- | --- | --- | --- | --- |
+| CUDA graphs, util 0.92 | 102,000 | 12 | ~1,416/h | 1.85% |
+| CUDA graphs, util 0.96 | 119,600 | 14 | ~1,491/h | 1.81% |
+| CUDA graphs, util 0.96, **auto group** | 119,600 | 15 | ~1,440/h | 1.89% |
+| CUDA graphs, util 0.96, **fp8 KV** | 192,048 | 22 | ~1,113/h | **37.5%** |
+
+What that settles:
+
+1. **CUDA graphs are worth ~17% per group slot**, not the 1.5–2.5× I predicted
+   from the eager-mode decode timings. The workload is serialised by 78
+   sequential dependencies per respondent, so *concurrency* — not kernel-launch
+   overhead — is the binding constraint, and concurrency is capped by KV cache.
+2. **fp8 KV cache is ruled out on evidence, not principle.** It does double the
+   cache and does allow a 57% bigger group, and it is still *slower*, because it
+   drives the illegal-draw rate from 1.8% to 37.5% and the retries eat the gain.
+   Quantised attention visibly corrupts this model's short-answer generation.
+   That is a much better reason to reject it than the fidelity worry I started
+   with.
+3. **Group size is now fitted to the cache** the engine actually reports, from
+   the worst-case transcript length (7,499 tokens incl. margin — the measured max
+   is 7,185). Worst-case working set at group 15 is 107,775 of 119,600 tokens, so
+   no session is ever evicted.
+
+Net: ~1,450–1,490 respondents/hour, **≈12.2 h** for 18,000, against ~1,280/h
+measured on the old stack. Two environment breakages also had to be fixed:
+`HF_HOME` points at a container-local path holding only metadata while the
+weights live in the mounted cache (and the image's `hf_xet` is broken, so the
+fallback download raises), and the compile cache had to move out of the repo
+tree.
+
+### What the first calibration measured (vLLM 0.11)
 
 Three calibration runs, 34-68 respondents each, all 17 arms:
 
@@ -276,6 +314,41 @@ Three things had to be fixed before those numbers were trustworthy:
    halved. This is the single most dangerous class of bug in this design — a
    parsing rule that fails differently across options silently reshapes the
    distribution it is supposed to be measuring.
+
+### The option-dependent rejection problem, and how it is now policed
+
+The `max_tokens` bug was the first instance of a general failure mode, and two
+more turned up in the live run. Rejection sampling is unbiased **only if the
+rejection probability does not depend on which answer the model meant**. Where it
+does, the retained distribution is skewed by exactly that asymmetry.
+
+Found and fixed:
+
+1. **Truncated long options** (above) — income collapsed onto its two shortest
+   brackets.
+2. **Dropped currency symbols and separators.** The model writes
+   `100,000 to $167,999` or `30000 to 55999`. Rejecting these gave a failure rate
+   of 3% for the one income option starting with a word and 58% for the ones
+   starting with `$`, inflating the `$30,000–$55,999` bracket from ~18% to ~28%.
+   Money options now compare with the cosmetics stripped, guarded so the laxity
+   is refused if it would make two options ambiguous.
+3. **Slider decimals.** `92.36` was refused as a non-integer. But a slider is a
+   continuous control that the survey records as an integer, so the answer is
+   real and is now rounded the way the instrument would round it.
+
+Policed by a **near-miss diagnostic** (`stats.near_misses`) that splits rejected
+draws into those that mean a legal answer under a loose comparison — a parser
+bug, bias-prone — and those that answer a different question — correctly
+rejected. After the fixes the remaining rejections are overwhelmingly the second
+kind: bare numerals on `newsletter` and `education_climate_*` (slider-style
+values bleeding in from neighbouring items, 2% near-miss share), and
+out-of-frame refusals like "Not applicable" on `social_class`.
+
+One residual is reported rather than fixed: on `newsletter` — a *scored* binary
+outcome — the in-format answers run 65/35 No/Yes while the rejected numerals, if
+read as codes, would imply 56/44. The numerals include values like 30 and 7, so
+they are not a coherent coding and cannot be mapped without guessing; the
+discrepancy is recorded in the diagnostics sub-report instead.
 
 ### Throughput — the real risk
 
