@@ -67,7 +67,9 @@ CONSENT = Block(
                     "Faculty-directed Research. Her faculty sponsor is Professor Jay "
                     "Van Bavel, Department of psychology, CAS, New York University."
                 ),
-                Text("If you agree to be in this study, you will be asked to do the following:"),
+                Text(
+                    "If you agree to be in this study, you will be asked to do the following:"
+                ),
                 Bullets(
                     [
                         "Complete a set of online questionnaires. You may be asked to "
@@ -123,7 +125,9 @@ CONSENT = Block(
                 ),
                 Choice(
                     slot="Q5",
-                    options=["Yes, I am at least 18 years old and I want to participate"],
+                    options=[
+                        "Yes, I am at least 18 years old and I want to participate"
+                    ],
                 ),
             ],
         ),
@@ -131,7 +135,7 @@ CONSENT = Block(
             timer=None,
             elements=[
                 Text(
-                    'The color test you are about to take part in is very simple. '
+                    "The color test you are about to take part in is very simple. "
                     'Please select the color "purple" from the list below. We would '
                     "like to make sure that you are reading these questions carefully."
                 ),
@@ -165,7 +169,7 @@ INTRO = Block(
                     "report your beliefs or behaviors, or even write a small paragraph."
                 ),
                 Text(
-                    'Before we begin, we would like to clarify what we mean by '
+                    "Before we begin, we would like to clarify what we mean by "
                     '"climate change".'
                 ),
                 Text(
@@ -203,8 +207,14 @@ BELIEF = Block(
                             "Taking action to fight climate change is necessary to "
                             "avoid a global catastrophe.",
                         ),
-                        ("Belief.in.CC_2", "Human activities are causing climate change."),
-                        ("Belief.in.CC_4", "Climate change poses a serious threat to humanity."),
+                        (
+                            "Belief.in.CC_2",
+                            "Human activities are causing climate change.",
+                        ),
+                        (
+                            "Belief.in.CC_4",
+                            "Climate change poses a serious threat to humanity.",
+                        ),
                         ("Belief.in.CC_5", "Climate change is a global emergency."),
                     ],
                 ),
@@ -226,7 +236,9 @@ POLICY = Block(
                     "This can include the implementation of laws and requirements which "
                     "broadly aim to reduce various greenhouse gasses."
                 ),
-                Text("Please indicate your level of agreement with the following statements."),
+                Text(
+                    "Please indicate your level of agreement with the following statements."
+                ),
                 Text("I support..."),
                 Matrix(
                     left="Not at all",
@@ -253,12 +265,18 @@ POLICY = Block(
                             "CC_policy_7",
                             "increasing taxes on carbon intense foods (for example meat, and dairy)",
                         ),
-                        ("CC_policy_8", "raising carbon taxes on gas/fossil fuels/coal"),
+                        (
+                            "CC_policy_8",
+                            "raising carbon taxes on gas/fossil fuels/coal",
+                        ),
                         (
                             "CC_policy_9",
                             "increasing the use of sustainable energy such as wind and solar energy",
                         ),
-                        ("CC_policy_10", "introducing laws to keep waterways and oceans clean"),
+                        (
+                            "CC_policy_10",
+                            "introducing laws to keep waterways and oceans clean",
+                        ),
                     ],
                 ),
             ],
@@ -285,7 +303,9 @@ def sharing_block(cond_code: int) -> Block:
                     Text(
                         "Are you willing to share this information (above) on your social media?"
                     ),
-                    Text("If yes, please do it now, by copying and pasting the entire message."),
+                    Text(
+                        "If yes, please do it now, by copying and pasting the entire message."
+                    ),
                     Choice(
                         slot="Share",
                         options=[
@@ -299,7 +319,9 @@ def sharing_block(cond_code: int) -> Block:
             Screen(
                 timer="share_timer2",
                 elements=[
-                    Text("Please select the platform you posted it on (select all that apply):"),
+                    Text(
+                        "Please select the platform you posted it on (select all that apply):"
+                    ),
                     MultiChoice(
                         slot="Share2",
                         options=[
@@ -381,7 +403,7 @@ _WEPT_OFFER_DEFAULT = (
 )
 
 _WEPT_TASK_PROMPT = (
-    'Identify all those stimuli with an even first digit and an odd second digit. '
+    "Identify all those stimuli with an even first digit and an odd second digit. "
     'For example, you should click on "25", because the first digit (2) is even and '
     "the second digit is odd (5)."
 )
@@ -420,7 +442,9 @@ def _wept_pages() -> list[Screen]:
         screens.append(
             Screen(
                 timer=decision_timers[i - 1],
-                condition=None if i == 1 else f"reached only if page {i - 1} was accepted",
+                condition=(
+                    None if i == 1 else f"reached only if page {i - 1} was accepted"
+                ),
                 elements=[
                     Text(_WEPT_OFFER.get(i, _WEPT_OFFER_DEFAULT)),
                     _tree_pictogram(i),
@@ -648,7 +672,10 @@ CONTROL_EXTRA_IVS = Block(
                     right="Strongly agree",
                     randomised=True,
                     items=[
-                        ("Enviro_motiv_1", "Being pro-environmental is important to my self-concept."),
+                        (
+                            "Enviro_motiv_1",
+                            "Being pro-environmental is important to my self-concept.",
+                        ),
                         (
                             "Enviro_motiv_11",
                             "I attempt to behave pro-environmentally because it is "
@@ -723,15 +750,27 @@ TERMS_PROBING_ITEMS = [
     ("probe_CC_1", "To what degree are you willing to act to prevent climate change?"),
     ("probe_GW_1", "To what degree are you willing to act to prevent global warming?"),
     ("probe_GH_1", "To what degree are you willing to act to prevent global heating?"),
-    ("probe_CCrisis_1", "To what degree are you willing to act to prevent the climate crisis?"),
-    ("probe_GE_1", "To what degree are you willing to act to reduce the greenhouse effect?"),
+    (
+        "probe_CCrisis_1",
+        "To what degree are you willing to act to prevent the climate crisis?",
+    ),
+    (
+        "probe_GE_1",
+        "To what degree are you willing to act to reduce the greenhouse effect?",
+    ),
     ("probe_CE_1", "To what degree are you willing to act to reduce carbon emissions?"),
-    ("probe_CP_1", "To what degree are you willing to act to reduce greenhouse gasses?"),
+    (
+        "probe_CP_1",
+        "To what degree are you willing to act to reduce greenhouse gasses?",
+    ),
     (
         "probe_CEmerg_1",
         "To what degree are you willing to act to prevent the climate emergency?",
     ),
-    ("probe_CPoll_1", "To what degree are you willing to act to reduce carbon pollution?"),
+    (
+        "probe_CPoll_1",
+        "To what degree are you willing to act to reduce carbon pollution?",
+    ),
 ]
 
 
@@ -745,7 +784,9 @@ def terms_probing_block(item_index: int = 0) -> Block:
             Screen(
                 timer="ControlIV_timer",
                 elements=[
-                    Slider(slot=slot, stem=stem, left="Not at all", right="Very much so")
+                    Slider(
+                        slot=slot, stem=stem, left="Not at all", right="Very much so"
+                    )
                 ],
             )
         ],
@@ -829,7 +870,9 @@ def demographics_block(profile: CountryProfile) -> Block:
             Screen(
                 timer="demo_timer7",
                 elements=[
-                    Text("What is your political orientation for the issues listed below?"),
+                    Text(
+                        "What is your political orientation for the issues listed below?"
+                    ),
                     Text(
                         'Please note, by "liberal" we mean classically left-wing, and by '
                         '"conservative", we mean classically right-wing.'

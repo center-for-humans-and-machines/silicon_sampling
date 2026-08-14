@@ -31,6 +31,8 @@ services:
       - ${HOME}/tmp/cluster_transfer:/var/cluster_transfer
       - ${HOME}/claude_tools:/opt/claude_tools:ro
       - ${HOME}/secrets/silicon_sampling_deploy_key:/home/claude/.ssh
+      - ${HOME}/.cache/huggingface:/home/claude/.cache/huggingface
+      - ${HOME}/github_repos/silicon-sample-submission:/opt/silicon-sample-submission
     entrypoint: ["claude"]
     command: ["--dangerously-skip-permissions"]
     networks:
