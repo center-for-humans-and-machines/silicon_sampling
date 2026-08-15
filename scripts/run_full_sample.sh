@@ -31,8 +31,15 @@ for attempt in $(seq 1 40); do
 
     # A stale engine from a killed attempt would hold the GPU and make the next
     # start fail on memory; clear it before trying again.
+    # A previous attempt's engine can still hold the GPU; starting before it
+    # lets go fails on memory and burns an attempt. Wait for the card, don't
+    # guess how long it takes.
     pkill -9 -f 'VLLM::EngineCore' 2>/dev/null
-    sleep 5
+    for _ in $(seq 1 60); do
+        used=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
+        [ "${used:-9999}" -lt 2000 ] && break
+        sleep 5
+    done
 
     python -m silicon_sampling.pfander.cli sample --group-size "$GROUP" --gpu-memory-utilization 0.96 >> "$LOG" 2>&1
     status=$?
