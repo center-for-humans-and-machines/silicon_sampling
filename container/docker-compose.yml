@@ -33,6 +33,7 @@ services:
       - ${HOME}/secrets/silicon_sampling_deploy_key:/home/claude/.ssh
       - ${HOME}/.cache/huggingface:/home/claude/.cache/huggingface
       - ${HOME}/github_repos/silicon-sample-submission:/opt/silicon-sample-submission
+      - ${HOME}/github_repos/llm_predictions_megastudy:/opt/llm_predictions_megastudy
     entrypoint: ["claude"]
     command: ["--dangerously-skip-permissions"]
     networks:
