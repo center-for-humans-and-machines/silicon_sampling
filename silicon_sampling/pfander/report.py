@@ -19,6 +19,8 @@ from ..analysis import moderators as mod
 from ..analysis import plotting as viz
 from . import outcomes
 from .conditions import INTERVENTIONS
+from .run import all_slots
+from .stats import near_misses
 
 MODERATORS = tuple(outcomes.MODERATORS)
 
@@ -545,6 +547,64 @@ def diagnostics_report(
             fmt="{:.0f}",
         )
 
+    near = pd.DataFrame(near_misses(run_dir, all_slots()))
+    scored_items = (
+        set(outcomes.DIRECT)
+        | {item for items in outcomes.MEANS.values() for item in items}
+        | {"funding_5", "newsletter"}
+    )
+    if not near.empty:
+        scored = near[near["slot"].isin(scored_items)]
+        worst_scored = scored.sort_values(
+            "near_misses_per_asked", ascending=False
+        ).head(1)
+        scored_note = (
+            f"Across the {len(scored_items)} items feeding the 13 scored outcomes, the worst near-miss rate is "
+            f"**{worst_scored['near_misses_per_asked'].iloc[0]:.3f} per respondent** "
+            f"(`{worst_scored['slot'].iloc[0]}`), and the median is "
+            f"{scored['near_misses_per_asked'].median():.4f}. No scored outcome is materially exposed."
+            if len(scored)
+            else "No scored item had any rejected draw."
+        )
+    else:
+        scored_note = "No draws were rejected."
+    if not near.empty:
+        near = near[near["rejected"] >= 5].copy()
+        near["examples"] = near["examples"].map(
+            lambda items: "; ".join(repr(item)[:26] for item in items)
+        )
+        near_miss_table = md_table(
+            near[
+                [
+                    "slot",
+                    "asked",
+                    "rejected",
+                    "rejected_per_asked",
+                    "near_misses",
+                    "near_miss_share",
+                    "examples",
+                ]
+            ],
+            floats=2,
+        )
+    else:
+        near_miss_table = "_No draws were rejected._"
+
+    # The one residual worth naming: a scored binary outcome whose rejected draws
+    # are bare numerals, which cannot be mapped to Yes/No without guessing.
+    newsletter_note = ""
+    if "newsletter" in frame.columns:
+        shares = frame["newsletter"].value_counts(normalize=True)
+        newsletter_note = (
+            "The one residual reported rather than fixed is `newsletter`, a scored binary outcome. Its rejected\n"
+            "draws are bare numerals, and they are not a coherent coding — the values include 30 and 7 as well as\n"
+            "0, 1 and 2 — so they look like slider answers bleeding in from neighbouring items rather than\n"
+            f"Qualtrics codes, and cannot be mapped to Yes/No without guessing. In-format answers run\n"
+            f"{shares.get('No', 0):.0%} No / {shares.get('Yes', 0):.0%} Yes; if the numerals were read as codes they would imply a\n"
+            "somewhat higher Yes share. Rejecting them uniformly is the honest treatment, and this is the\n"
+            "resulting uncertainty on that one outcome.\n"
+        )
+
     state_note = ""
     if "state" in frame.columns and "zip_code" in frame.columns:
         weather = frame[frame["condition"] == "Extreme weather predictions"]
@@ -595,6 +655,34 @@ buried; a forced default means even that failed.
 
 {md_table(worst) if not worst.empty else "_No draws were rejected._"}
 
+## Is any rejection biasing an answer? (near-miss analysis)
+
+Rejection sampling is unbiased **only if the rejection probability does not
+depend on which answer the model meant**. Where it does, the retained
+distribution is skewed by exactly that asymmetry — and this failure is silent.
+
+Each rejected draw is therefore classified. A *near miss* would match a legal
+option under a loose comparison (different punctuation, a missing currency
+symbol): the model gave the right answer in the wrong spelling, and rejecting it
+is dangerous, because whether that happens depends on which option was meant. A
+non-near-miss matches nothing legal: the model answered a different question, and
+rejecting it is correct.
+
+A high `near_miss_share` says a slot's rejections are suspect; only
+`near_misses_per_asked` says how much of the distribution is actually exposed to
+them. The table is sorted by the latter.
+
+**The scored outcomes are clean.** {scored_note}
+
+{near_miss_table}
+
+Two option-dependent rejections were found this way and fixed before this run:
+money options rejected when the model dropped a `$` or a thousands separator
+(which had inflated one income bracket from ~18% to ~28%), and slider decimals
+rejected as non-integers (a slider is a continuous control the survey records as
+an integer, so `92.36` is a real position and is now rounded).
+
+{newsletter_note}
 ## Internal consistency of the generated session
 {state_note}
 ## A sample of the free-text answers
@@ -632,6 +720,26 @@ def generate(samples_csv: Path, run_dir: Path, out: Path) -> dict:
     degeneracy = part3["degeneracy"]
     primary_deg = degeneracy[degeneracy["variable"] == PRIMARY].iloc[0]
     top_predict = part2["predict"].sort_values("r2_moderator", ascending=False).iloc[0]
+    # The partisan gap in climate belief is the most legible single number for
+    # whether a synthetic sample's respondents differ from one another at all.
+    party_means = frame.groupby("party")["belief_post"].mean().to_dict()
+    party_gap = abs(
+        party_means.get("Democrat", float("nan"))
+        - party_means.get("Republican", float("nan"))
+    )
+    # The contrast that makes the flatness diagnostic rather than merely
+    # disappointing: within-person item structure is good, between-person is not.
+    reliabilities = part3["reliabilities"].set_index("scale")["alpha"]
+    flatness = part3["flatness"].set_index("battery")["share_flat"]
+    trust_scale = next(
+        name for name in reliabilities.index if name.startswith("Trust in climate")
+    )
+    policy_scale = next(
+        name for name in reliabilities.index if name.startswith("Specific climate")
+    )
+    alpha_trust = reliabilities[trust_scale]
+    alpha_policy = reliabilities[policy_scale]
+    flat_trust = flatness[trust_scale]
 
     counts = frame["condition"].value_counts()
     per_arm = counts.drop("control", errors="ignore")
@@ -679,6 +787,38 @@ Three things decide whether this sample is worth anything, and they are separabl
    On the primary outcome the modal answer is taken by
    {primary_deg['modal_share']:.1%} of respondents, and
    {primary_deg['share_multiple_of_10']:.1%} of answers are multiples of 10.
+
+## The headline weakness: these respondents have no demographics
+
+This sample's respondents are demographically **flat**. The model writes a party
+identity, an income and an education into the transcript, then answers the rest of
+the questionnaire as if it had not.
+
+On belief in human-caused climate change, the synthetic Republicans and Democrats
+differ by **{party_gap:.1f} points on a 0-100 scale**
+({party_means.get('Republican', float('nan')):.1f} vs
+{party_means.get('Democrat', float('nan')):.1f}). In US survey data this is one of
+the largest and most reliable partisan gaps in the whole of public opinion —
+routinely tens of points. Across all six moderators and all 13 outcomes, the
+largest variance any moderator explains beyond condition is
+**R² = {top_predict['r2_moderator']:.3f}** ({top_predict['moderator']} on
+`{top_predict['outcome']}`).
+
+What makes this sharp rather than merely disappointing is that the *within*-person
+structure is good. The multi-item scales hold together like real ones — Cronbach's
+α of {alpha_trust:.2f} on the 12-item trust battery, {alpha_policy:.2f} on the
+seven policy items — and only {flat_trust:.0%} of respondents give a flat profile
+across all twelve trust items. The model writes a coherent individual; it just
+writes nearly the *same* individual every time, whatever demographics it has
+placed at the top of the page.
+
+This is the *opposite* of the failure the benchmark's stereotyping diagnostic is
+built to catch. A model answering from a stereotype produces subgroup differences
+that are too large and too clean; this one produces almost none. For the
+benchmark that is the more damaging error of the two, because every subgroup and
+demographic-baseline estimate the submission makes is close to a constant, while
+the average treatment effects — which do not depend on between-person variation —
+remain usable. Detail in [sub-report 2](02_demographics.md).
 
 ## Between-message variation
 

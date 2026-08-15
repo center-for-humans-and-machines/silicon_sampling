@@ -1,4 +1,4 @@
-# [ACTIVE] Pfänder megastudy — text templates, silicon sampling with Qwen2.5-7B, and analysis
+# [DONE] Pfänder megastudy — text templates, silicon sampling with Qwen2.5-7B, and analysis
 
 Tasks:
 [jan_pfanders_silicon_sampling.md](../tasks/jan_pfanders_silicon_sampling.md) →
@@ -566,32 +566,59 @@ Still assumptions:
 **Phase 2 — sampling**
 5. [x] 18,000 profiles from the quota margins; both margins reproduce to ±2.
 6. [x] vLLM driver: group scheduler, rejection sampler, checkpointing, teardown.
-7. [x] **Calibration** — see the table above. Group 16, ~1,300/h, ≈14 h projected.
-8. [~] **Format pilot — dropped, deliberately.** The pilot's purpose was to
-   *choose* between candidate transcript formats on legality, non-degeneracy and
-   demographic plausibility. Two things killed it. Its criteria are already met
-   by the single format (2.4 % rejection, no degeneracy, plausible income and
-   education marginals), and — the real reason — selecting a format on the
-   plausibility of *unscored* demographics means tuning the instrument against my
-   own priors about what US party ID should look like, with no ground truth to
-   adjudicate and every opportunity to bake a prior into a "measurement". The
-   format is instead chosen on stated design reasoning (documented in
-   `00_FORMAT.md`) and the diagnostics are **reported rather than selected on**.
-9. [ ] Full run → 18,000 transcripts. *Launched 2026-08-14 15:18, detached and
-   resumable via `scripts/run_full_sample.sh`.*
-10. [ ] `samples.csv` + `tier1_submission.csv` + `run_meta.json`. *Export verified
-    on calibration data: column order matches the benchmark's example Tier-1 file
-    exactly.*
+7. [x] **Calibration** — twice, once per vLLM version; see the tables above.
+8. [~] **Format pilot — dropped, deliberately.** Its purpose was to *choose*
+   between transcript formats on legality, non-degeneracy and demographic
+   plausibility. Two things killed it: the single format already meets those
+   criteria, and selecting a format on the plausibility of *unscored*
+   demographics means tuning the instrument against my own priors about what US
+   party ID should look like, with no ground truth to adjudicate. The format is
+   chosen on stated design reasoning (`00_FORMAT.md`) and the diagnostics are
+   **reported rather than selected on**.
+9. [x] Full run: **18,000 respondents in 803.8 min (13.4 h)**, 1,344/h average,
+   1.74% of draws rejected, 350 constrained-decoding fallbacks, 0 forced defaults.
+10. [x] `samples.csv` (18,000 × 124), `tier1_submission.csv` (18,000 × 33, column
+    order identical to the benchmark's example), `run_meta.json`. Validated:
+    schema, value ranges, codebook moderator levels, composite reconstruction and
+    quota reproduction all check out.
 
 **Phase 3 — analysis**
 11. [x] `silicon_sampling/analysis/` — OLS with HC1 (checked against a
     hand-computed unequal-variance SE), effects, moderators, distributions,
-    plotting on the validated palette.
-12. [ ] Compute everything; generate plots. *Blocked on the sampling run.*
-13. [ ] Write the four sub-reports and the main report. *Report generator written.*
+    plotting on a validated palette.
+12. [x] Computed; 12 plots generated.
+13. [x] `docs/reports/pfander_silicon_sample/` — main report plus four
+    sub-reports.
 
 **Wrap-up**
-14. [x] `black .`; `flake8 . --max-line-length=200 --extend-ignore=E203,W503` clean;
-    13 checks in `tests/test_pfander.py` pass.
-15. [ ] Move the four task files to `docs/tasks/archive/`; mark this plan DONE
-    and move to `docs/plans/archive/`; commit and push.
+14. [x] `black .`; `flake8` clean; 14 checks in `tests/test_pfander.py` pass.
+15. [x] Tasks moved to `docs/tasks/archive/`; this plan moved to
+    `docs/plans/archive/`; committed and pushed.
+
+## Result
+
+Headline numbers are in [the report](../reports/pfander_silicon_sample/README.md).
+The three that matter:
+
+- **Effects are plausible and well-powered.** Control mean 53.4 on the primary
+  outcome; the 16 interventions run from −1.95 to +8.47 scale points, 15 of 16
+  positive, 57 of 208 effects surviving Holm correction. Real between-message
+  variation on the primary outcome is 2.41 pp after removing sampling noise.
+- **The item-level psychometrics are genuinely survey-like.** Cronbach's α from
+  0.72 to 0.92 across the nine multi-item batteries, sensible inter-item
+  correlations, 3–13% flat profiles, no degenerate piling on 0/50/100.
+- **The respondents have no demographics.** Synthetic Republicans and Democrats
+  differ by 1.1 points on climate belief, where the real partisan gap is tens of
+  points; the largest variance any of the six moderators explains beyond
+  condition is R² = 0.002. The model writes a coherent individual and then writes
+  nearly the same individual every time. This is the opposite of the stereotyping
+  failure the benchmark screens for, and for a submission scored on subgroup
+  heterogeneity it is the more damaging one — the ATEs stay usable, every
+  subgroup and demographic-baseline estimate does not.
+
+Worth a follow-up if this is taken further: the flatness is the thing to attack,
+and the obvious lever is the one deliberately left alone here — the pre-filled
+set. Age, gender and race were pre-filled because the task fixed that scope;
+pre-filling party, income and education from a joint distribution, so the model
+reads a *committed* identity rather than one it invented a page earlier, is the
+natural next experiment.

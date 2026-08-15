@@ -357,7 +357,11 @@ def near_misses(run_dir: Path, slots: dict) -> list[dict]:
                 "rejected_per_asked": entry["rejected"] / max(asked.get(slot_id, 0), 1),
                 "near_misses": entry["near"],
                 "near_miss_share": entry["near"] / entry["rejected"],
+                "near_misses_per_asked": entry["near"] / max(asked.get(slot_id, 0), 1),
                 "examples": entry["examples"],
             }
         )
-    return sorted(rows, key=lambda row: -row["near_miss_share"])
+    # Sorted by near misses *per slot asked*, not by share: the share says how
+    # suspect a slot's rejections are, but only the rate says how much of the
+    # distribution is actually exposed to them.
+    return sorted(rows, key=lambda row: -row["near_misses_per_asked"])
