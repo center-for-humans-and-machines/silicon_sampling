@@ -64,16 +64,28 @@ class Fit:
         }
 
 
-def ols(X: np.ndarray, y: np.ndarray, names: Sequence[str]) -> Fit:
-    """Fit ``y ~ X`` (X must already contain an intercept column)."""
+def ols(X: np.ndarray, y: np.ndarray, names: Sequence[str], robust: str = "HC1") -> Fit:
+    """Fit ``y ~ X`` (X must already contain an intercept column).
+
+    ``robust`` picks the heteroskedasticity-consistent variant: ``HC1`` scales the
+    squared residuals by ``n/(n-k)``, ``HC2`` divides each by ``1 - h_ii``, its own
+    leverage. HC2 is what the Voelkel study and the benchmark preregistration use,
+    and it matters where cell sizes are uneven — a control arm five times the size
+    of each treatment arm, as here.
+    """
     X = np.asarray(X, dtype=float)
     y = np.asarray(y, dtype=float)
     n, k = X.shape
     xtx_inv = np.linalg.pinv(X.T @ X)
     beta = xtx_inv @ X.T @ y
     resid = y - X @ beta
-    meat = (X * (resid**2)[:, None]).T @ X
-    cov = xtx_inv @ meat @ xtx_inv * (n / max(n - k, 1))
+    if robust.upper() == "HC2":
+        leverage = np.einsum("ij,jk,ik->i", X, xtx_inv, X)
+        weights = resid**2 / np.clip(1 - leverage, 1e-12, None)
+        cov = xtx_inv @ ((X * weights[:, None]).T @ X) @ xtx_inv
+    else:
+        meat = (X * (resid**2)[:, None]).T @ X
+        cov = xtx_inv @ meat @ xtx_inv * (n / max(n - k, 1))
     centred = y - y.mean()
     ss_tot = float(centred @ centred)
     r2 = 1.0 - float(resid @ resid) / ss_tot if ss_tot > 0 else 0.0
