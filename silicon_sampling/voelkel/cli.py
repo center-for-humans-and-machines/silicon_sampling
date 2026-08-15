@@ -38,6 +38,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     sample.add_argument("--no-resume", action="store_true")
 
+    csv_cmd = sub.add_parser(
+        "build-csv", help="answers.jsonl -> samples.csv with the nine outcomes"
+    )
+    csv_cmd.add_argument("--out", default=None)
+
+    score_cmd = sub.add_parser(
+        "score", help="score the sample against the real responses"
+    )
+    score_cmd.add_argument("--out", default=None)
+
     args = parser.parse_args(argv)
 
     if args.command == "build-profiles":
@@ -82,6 +92,20 @@ def main(argv: list[str] | None = None) -> int:
             ),
         )
         runner.run(everyone, resume=not args.no_resume)
+        return 0
+
+    if args.command == "build-csv":
+        from .export import build_csv
+
+        summary = build_csv(Path(args.out) if args.out else paths.SAMPLES)
+        print(summary)
+        return 0
+
+    if args.command == "score":
+        from .report import generate
+
+        result = generate(out=Path(args.out) if args.out else paths.REPORT)
+        print(result["board"].to_string(index=False))
         return 0
 
     return 1  # pragma: no cover

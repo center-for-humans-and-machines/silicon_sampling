@@ -79,7 +79,11 @@ REQUIRED_ITEMS = (
 
 
 def _num(frame: pd.DataFrame, name: str) -> pd.Series:
-    return pd.to_numeric(frame[name], errors="coerce") if name in frame.columns else pd.Series(np.nan, index=frame.index)
+    return (
+        pd.to_numeric(frame[name], errors="coerce")
+        if name in frame.columns
+        else pd.Series(np.nan, index=frame.index)
+    )
 
 
 def compute(frame: pd.DataFrame, inparty: str = "inparty") -> pd.DataFrame:
@@ -111,11 +115,25 @@ def compute(frame: pd.DataFrame, inparty: str = "inparty") -> pd.DataFrame:
     data["PA"] = (data["PA_Out"] + data["PA_DG_scaled"]) / 2
 
     data["ADA"] = sum(item(f"ADA_{i}", f"ADA_{i}_1") for i in range(1, 5)) / 4
-    data["SPV"] = (item("SPV_1", "SPV_1_2") + item("SPV_2", "SPV_2_2") + item("SPV_3", "SPV_3_1") + item("SPV_4", "SPV_4_2")) / 4
-    data["SUC"] = (item("SUC_1", "SUC_1_1") + item("SUC_2", "SUC_2_1") + item("SUC_3", "SUC_3_1") + item("SUC_4 ", "SUC_4_", "SUC_4__1")) / 4
+    data["SPV"] = (
+        item("SPV_1", "SPV_1_2")
+        + item("SPV_2", "SPV_2_2")
+        + item("SPV_3", "SPV_3_1")
+        + item("SPV_4", "SPV_4_2")
+    ) / 4
+    data["SUC"] = (
+        item("SUC_1", "SUC_1_1")
+        + item("SUC_2", "SUC_2_1")
+        + item("SUC_3", "SUC_3_1")
+        + item("SUC_4 ", "SUC_4_", "SUC_4__1")
+    ) / 4
 
-    data["OppBip"] = 100 - (item("SupBip_1", "SupBip_1_1") + item("SupBip_2", "SupBip_2_1")) / 2
-    data["SocDis"] = 100 - (item("SocDis_1", "SocDis_1_1") + item("SocDis_2", "SocDis_2_1")) / 2
+    data["OppBip"] = (
+        100 - (item("SupBip_1", "SupBip_1_1") + item("SupBip_2", "SupBip_2_1")) / 2
+    )
+    data["SocDis"] = (
+        100 - (item("SocDis_1", "SocDis_1_1") + item("SocDis_2", "SocDis_2_1")) / 2
+    )
     data["SocDistrust"] = 100 - item("SocTru", "SocTru_1")
 
     bepf_r = sum(item(f"BEPF_R{i}", f"BEPF_R{i}_1") for i in range(1, 5)) / 4
@@ -124,11 +142,15 @@ def compute(frame: pd.DataFrame, inparty: str = "inparty") -> pd.DataFrame:
     # reverse of how critically they evaluate it.
     data["BEPF"] = np.where(republican, 100 - bepf_r, 100 - bepf_d)
 
-    data["Composite"] = data[["PA", "ADA", "SPV", "SUC", "OppBip", "SocDis", "SocDistrust", "BEPF"]].mean(axis=1)
+    data["Composite"] = data[
+        ["PA", "ADA", "SPV", "SUC", "OppBip", "SocDis", "SocDistrust", "BEPF"]
+    ].mean(axis=1)
     return data
 
 
-def verify_against_published(published: pd.DataFrame, raw: pd.DataFrame, tolerance: float = 1e-6) -> pd.DataFrame:
+def verify_against_published(
+    published: pd.DataFrame, raw: pd.DataFrame, tolerance: float = 1e-6
+) -> pd.DataFrame:
     """Recompute the outcomes from raw responses and check the published columns.
 
     A sign or an item flipped here would invert the comparison the whole report
@@ -148,7 +170,9 @@ def verify_against_published(published: pd.DataFrame, raw: pd.DataFrame, toleran
                 "outcome": outcome,
                 "n_compared": int(both.sum()),
                 "n_published": int(theirs.notna().sum()),
-                "max_abs_diff": float(difference.max()) if len(difference) else float("nan"),
+                "max_abs_diff": (
+                    float(difference.max()) if len(difference) else float("nan")
+                ),
                 "matches": bool(len(difference) and difference.max() < tolerance),
             }
         )
