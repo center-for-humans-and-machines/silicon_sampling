@@ -8,6 +8,7 @@ because the full run does not fit in one shell invocation.
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -76,7 +77,7 @@ def fit_token_budgets(model: str) -> dict[str, int]:
     }
 
 
-def max_transcript_tokens(model: str) -> int:
+def max_transcript_tokens(model: str, shard: str | None = None) -> int:
     """Length of the longest transcript any respondent can produce.
 
     This is what a session must hold in the KV cache for its whole life, so it
@@ -116,6 +117,30 @@ def max_transcript_tokens(model: str) -> int:
     # Margin for the free-text slot, whose real output tokenises denser than the
     # placeholder above: measured transcripts ran ~1% past the unpadded figure.
     return int(longest * 1.05)
+
+
+def repair_jsonl(path: Path) -> int:
+    """Drop a partial final line, returning the bytes removed.
+
+    A run killed mid-write leaves an unterminated record.  Reading tolerates
+    that, but *appending* does not: the next write lands on the same line and
+    fuses two records into one unparseable string, losing both.  Truncating back
+    to the last newline before appending is what makes an unexpected kill safe.
+    """
+    if not path.exists() or path.stat().st_size == 0:
+        return 0
+    with path.open("rb+") as handle:
+        handle.seek(-1, 2)
+        if handle.read(1) == b"\n":
+            return 0
+        size = path.stat().st_size
+        window = min(size, 1 << 20)
+        handle.seek(size - window)
+        tail = handle.read(window)
+        cut = tail.rfind(b"\n")
+        keep = size - window + cut + 1 if cut >= 0 else 0
+        handle.truncate(keep)
+        return size - keep
 
 
 def completed(answers_path: Path) -> set[str]:
@@ -196,12 +221,21 @@ class Runner:
                 )
                 + "\n"
             )
-        self._answers.flush()
-        self._draws.flush()
+        # flush() survives a killed process; fsync also survives a killed
+        # machine. One sync per group is free at this cadence.
+        for handle in (self._answers, self._draws):
+            handle.flush()
+            os.fsync(handle.fileno())
 
     # -- driving ---------------------------------------------------------- #
 
     def run(self, profiles: Sequence[Profile], resume: bool = True) -> dict:
+        for path in (self.answers_path, self.draws_path):
+            removed = repair_jsonl(path)
+            if removed:
+                print(
+                    f"[run] recovered {path.name}: dropped {removed} B of a torn final record"
+                )
         done = completed(self.answers_path) if resume else set()
         todo = [profile for profile in profiles if profile.profile_id not in done]
         print(
