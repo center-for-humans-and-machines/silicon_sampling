@@ -154,7 +154,15 @@ def prefilled_answers(profile: Profile) -> dict:
             "Party_Gen": profile.party_gen,
             "Filter": "Yes",
             "Attention_1": "Somewhat disagree",
-            "Attention_2": "attention",
+            # The second check is a comprehension item about a short article,
+            # not the Pfänder-style "type this word" check.
+            "Attention_2": "Event licensing",
+            "Transition_Int": "I understand I must complete the full study to collect my full earnings",
+            # A video screener everyone saw. Our arms are all text, but the block
+            # is part of the instrument, and the published sample contains only
+            # respondents who passed it — so it is filled in as passed rather
+            # than asked of a model that was shown no video.
+            "VideoCheck": "Saw waves crashing, Heard ocean waves",
         }
     )
     if profile.party_gen == "Independent":

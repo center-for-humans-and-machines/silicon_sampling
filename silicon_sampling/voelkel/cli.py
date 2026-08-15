@@ -30,8 +30,9 @@ def main(argv: list[str] | None = None) -> int:
     sample.add_argument("--draws-per-call", type=int, default=4)
     sample.add_argument("--model", default=EngineConfig.model)
     sample.add_argument("--max-model-len", type=int, default=12288)
-    sample.add_argument("--gpu-memory-utilization", type=float, default=0.96)
-    sample.add_argument("--max-num-seqs", type=int, default=512)
+    sample.add_argument("--gpu-memory-utilization", type=float, default=0.90)
+    sample.add_argument("--max-num-seqs", type=int, default=128)
+    sample.add_argument("--max-num-batched-tokens", type=int, default=4096)
     sample.add_argument(
         "--eager", dest="enforce_eager", action="store_true", default=False
     )
@@ -74,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
                 gpu_memory_utilization=args.gpu_memory_utilization,
                 enforce_eager=args.enforce_eager,
                 max_num_seqs=args.max_num_seqs,
+                max_num_batched_tokens=args.max_num_batched_tokens,
             ),
             SamplerConfig(
                 group_size=args.group_size, draws_per_call=args.draws_per_call

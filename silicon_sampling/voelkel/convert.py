@@ -122,6 +122,11 @@ def convert_question(question: Question, payload: dict, qid_to_slot: dict[str, s
         )
 
     if question.kind == "MC":
+        # Multi-select is deliberately not implemented: the only two in this
+        # instrument (race, the video screener) are supplied by the profile. A
+        # sampled one would be silently parsed as single-select, quietly
+        # discarding every answer that named more than one option, so it fails
+        # loudly instead.
         multi = question.selector.startswith("MA")
         options = tuple(o for o in question.choices if o)
         if not options:

@@ -12,6 +12,28 @@ from ..survey.slots import ChoiceSlot, FreeTextSlot, IntSlot, Slot
 from . import instrument as inst
 from .profiles import Profile
 
+MULTI_SELECT_PREFILLED = {"Race", "VideoCheck"}
+
+
+def _click_throughs(elements) -> dict:
+    """Single-option items: buttons the respondent pressed, not questions.
+
+    Qualtrics records a "Learn more" or "I understand ..." click as a
+    one-option multiple choice.  There is nothing to sample — the only legal
+    answer is the button's own label — so asking the model for it just spends
+    draws and manufactures rejections when it writes something else.  They are
+    filled in as pressed, the same treatment the consent items get.
+    """
+    filled = {}
+    for event, payload in walk(elements):
+        if (
+            event == "slot"
+            and isinstance(payload, ChoiceSlot)
+            and len(payload.options) == 1
+        ):
+            filled[payload.id] = payload.options[0]
+    return filled
+
 
 def session_for(profile: Profile) -> Session:
     """The session one profile walks through."""
@@ -21,10 +43,16 @@ def session_for(profile: Profile) -> Session:
         battery=profile.battery.split("|") if profile.battery else None,
         scenario=profile.scenario or None,
     )
+    answers = {**_click_throughs(elements), **profile.prefilled}
+    missing = MULTI_SELECT_PREFILLED - set(answers)
+    if missing:  # pragma: no cover - a guard, not a path
+        raise ValueError(
+            f"multi-select slots must be pre-filled, not sampled: {sorted(missing)}"
+        )
     return Session(
         header=inst.header(profile.profile_id, profile.condition),
         elements=elements,
-        answers=dict(profile.prefilled),
+        answers=answers,
         derive=inst.derive,
     )
 
