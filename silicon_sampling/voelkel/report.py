@@ -9,7 +9,6 @@ import pandas as pd
 
 from ..analysis import plotting as viz
 from ..benchmark.reference import ate_pairs, half_split
-from . import outcomes as oc
 from . import score as S
 from .paths import PLOTS, REPORT, SAMPLES
 
