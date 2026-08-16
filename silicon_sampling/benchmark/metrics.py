@@ -216,6 +216,10 @@ def cluster_bootstrap(
     frame = pd.DataFrame(samples)
     out = {}
     for column in frame.columns:
+        # Flags like rmse_adj_at_floor ride along in the statistic dict; a
+        # quantile of a boolean is meaningless (and numpy refuses it).
+        if pd.api.types.is_bool_dtype(frame[column]):
+            continue
         values = pd.to_numeric(frame[column], errors="coerce").dropna()
         if len(values) < 10:
             continue

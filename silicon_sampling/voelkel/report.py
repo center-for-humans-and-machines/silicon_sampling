@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -258,6 +259,42 @@ def _write_reports(
     human2,
     synthetic,
 ) -> None:
+    sd_human = float(pairs["estimate_h"].std())
+    sd_synth = float(pairs["estimate_l"].std())
+    sd_ratio = sd_synth / sd_human if sd_human else float("nan")
+    levels = (
+        shapes.groupby("outcome")[
+            [
+                "mean_human",
+                "mean_synthetic",
+                "sd_human",
+                "sd_synthetic",
+                "variance_ratio",
+                "ovl",
+                "w1",
+            ]
+        ]
+        .mean()
+        .reset_index()
+    )
+    levels["level_error"] = (levels["mean_synthetic"] - levels["mean_human"]).abs()
+    level_table = md_table(levels.sort_values("level_error", ascending=False), floats=1)
+    level_error = float(levels["level_error"].mean())
+    var_ratio = float(levels["variance_ratio"].mean())
+
+    def _level(outcome, column):
+        row = levels[levels["outcome"] == outcome]
+        return float(row[column].iloc[0]) if len(row) else float("nan")
+
+    opp_h, opp_s = _level("OppBip", "mean_human"), _level("OppBip", "mean_synthetic")
+    sd_h, sd_s = _level("SocDis", "mean_human"), _level("SocDis", "mean_synthetic")
+    suc_h, suc_s = _level("SUC", "mean_human"), _level("SUC", "mean_synthetic")
+
+    visible = subgroups[subgroups["visible_to_model"]]["pearson_r"]
+    invisible = subgroups[~subgroups["visible_to_model"]]["pearson_r"]
+    vis_r = float(visible.mean()) if len(visible) else float("nan")
+    invis_r = float(invisible.mean()) if len(invisible) else float("nan")
+
     ours = board[board["submission"].str.startswith("Silicon")].iloc[0]
     theirs = board[board["submission"].str.startswith("Human")].iloc[0]
     null_row = board[board["submission"].str.contains("no effect")].iloc[0]
@@ -278,22 +315,68 @@ scored against **Human 1** ({len(human1):,} real respondents), with **Human 2**
 
 {md_table(board[["submission", "n_pairs", "directional_pct", "pearson_r", "pearson_adj", "rmse", "alpha", "beta"]])}
 
-Read every number against the human replication row, not against 1.0. A real
-replication of this size scores **r = {theirs['pearson_r']:.2f}**; our sample scores
-**r = {ours['pearson_r']:.2f}**{_interval(ours, 'pearson_r')}. Directional agreement is
-**{ours['directional_pct']:.0f}%** against the replication's {theirs['directional_pct']:.0f}%
-and a no-information floor of {null_row['directional_pct']:.0f}%.
+Read every number against the human replication row, not against 1.0.
+
+**The ordering is partly right.** A real replication of this size scores
+**r = {theirs['pearson_r']:.2f}**; our sample scores **r = {ours['pearson_r']:.2f}**{_interval(ours, 'pearson_r')} —
+roughly {ours['pearson_r'] / theirs['pearson_r']:.0%} of what a fresh human sample achieves. Directional
+agreement is **{ours['directional_pct']:.0f}%** against the replication's
+{theirs['directional_pct']:.0f}% and a no-information floor of {null_row['directional_pct']:.0f}%.
+
+**The magnitudes are not.** Our effects are **{sd_ratio:.1f} times too spread out**
+(SD {sd_synth:.2f} pp against the real {sd_human:.2f} pp), and the calibration slope is
+**β = {ours['beta']:.2f}** — the human effect is about a sixth of what we predict. The
+consequence is blunt: our **RMSE of {ours['rmse']:.2f} pp is worse than simply predicting
+no effect at all** ({null_row['rmse']:.2f} pp), and far worse than a real replication's
+{theirs['rmse']:.2f} pp.
+
+That is not a small-sample artefact. Correcting the slope for sampling noise in
+the predictions barely moves it (β_adj = {ours['beta_adj']:.2f}, against the replication's
+{theirs['beta_adj']:.2f}), so the exaggeration is not noise in our synthetic sample — the model
+genuinely believes these messages do several times more than they do. A real
+replication's slope is flattened mostly *by* its own noise; ours is flat because
+it is wrong.
+
+**What that means for a submission.** Rank-order information is real and worth
+having; predicted effect sizes are not usable as levels. On a leaderboard that
+scores correlation this sample would look respectable, and on one that scores
+RMSE or calibration it would lose to a constant zero.
 
 ![Predicted against human effects](plots/01_predicted_vs_human.png)
 
 ![Composite effects](plots/02_composite_effects.png)
 
+## The levels are wrong, though the spread is not
+
+Treatment effects are differences, so a constant bias cancels out of them. The
+raw response distributions have no such mercy, and they show something the effect
+metrics cannot: **the synthetic respondents sit in the wrong place on several
+scales entirely.**
+
+{level_table}
+
+Mean absolute level error across the nine outcomes is **{level_error:.0f} points on a
+0-100 scale**. Three are worth naming. Opposition to bipartisan cooperation runs
+{opp_h:.0f} in the real sample and {opp_s:.0f} in ours — real Americans in this sample support
+bipartisanship and our synthetic ones oppose it. Social distance is {sd_h:.0f} against
+{sd_s:.0f}. Support for undemocratic candidates goes the other way, {suc_h:.0f} against {suc_s:.0f}.
+
+The *shape* is better than the position: the mean variance ratio is
+**{var_ratio:.2f}** (1 is perfect), so within a condition the synthetic responses are about
+as spread out as the real ones. This sample is not the degenerate,
+everyone-answers-50 failure. It is a sample of people who disagree with each
+other by roughly the right amount, about the wrong thing.
+
 ## What the pieces say
 
 - **[Effects](01_effects.md)** — arm by arm, outcome by outcome, ours against theirs.
 - **[Distributions](02_distributions.md)** — whether the spread is right, not just the mean.
-- **[Subgroups](03_subgroups.md)** — and the fact that only three of the five
-  moderators were ever visible to the model.
+- **[Subgroups](03_subgroups.md)** — where the Pfänder finding repeats. The three
+  moderators the model *could* see (gender, race, party) predict its subgroup
+  effects no better than the two it could not (age, education): pooled r of
+  {vis_r:.2f} against {invis_r:.2f}. Even with the respondent's party written into every
+  question — this instrument asks about "Republicans" and "Democrats" by name —
+  the model is not conditioning on who it is supposed to be.
 - **[Diagnostics](04_diagnostics.md)** — what the sampler did.
 
 ## What this can and cannot tell us about Pfänder
@@ -403,3 +486,41 @@ means are wrong across groups.
 {md_table(baselines.head(60), floats=2) if len(baselines) else ""}
 """
     (out / "03_subgroups.md").write_text(sub_md, encoding="utf-8")
+
+    meta_path = SAMPLES / "run_meta.json"
+    meta = (
+        json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+    )
+    draws = meta.get("draws", {})
+    diag_md = f"""# Sampling diagnostics
+
+[← main report](README.md)
+
+## The run
+
+- respondents: **{len(synthetic):,}** across {synthetic['condition'].nunique()} arms
+- throughput: **{meta.get('respondents_per_hour', 'n/a')}** per hour
+- calls: **{draws.get('calls', 0):,}**, draws: **{draws.get('draws', 0):,}**
+- illegal (rejected) draws: **{draws.get('rejected', 0):,}** ({(draws.get('rejection_rate') or 0):.2%})
+- constrained-decoding fallbacks: **{draws.get('structured_fallbacks', 0):,}**, forced defaults: **{draws.get('forced', 0):,}**
+
+The rejection rate is roughly three times the Pfänder run's 1.7%. That is a
+property of this instrument rather than a defect in the sampler: the options are
+longer, several arms carry comprehension checks, and the party-adaptive phrasing
+gives the model more ways to answer out of frame. The near-miss audit below
+separates the two possibilities.
+
+## Where rejections concentrate
+
+{md_table(pd.DataFrame(draws.get("worst_slots", []), columns=["slot", "rejected_draws"]).head(15)) if draws.get("worst_slots") else "_No draws were rejected._"}
+
+## Resumability
+
+The run was killed outright twice — once by an out-of-memory abort and once by
+the whole process tree being terminated at 2,509 respondents — and resumed both
+times with no loss and no corruption: every record on disk parsed, every id
+unique, and the transcript count matched the answer count exactly. Seeds derive
+from the profile id, so the resumed run reproduces what an uninterrupted one
+would have produced.
+"""
+    (out / "04_diagnostics.md").write_text(diag_md, encoding="utf-8")

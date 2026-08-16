@@ -1,0 +1,110 @@
+# Does silicon sampling work? A check against real data
+
+The Pfänder megastudy publishes no human data, so nothing in that submission can
+be verified. Voelkel et al. (2024) — the Strengthening Democracy Challenge — is
+the same shape and publishes **35,252 participant-level responses**. Running the
+identical pipeline over it and scoring it with the benchmark's own metrics is the
+closest available estimate of how the approach actually performs.
+
+**6,203 synthetic respondents** across 7 arms,
+scored against **Human 1** (6,259 real respondents), with **Human 2**
+(6,242) predicting Human 1 as the yardstick.
+
+## The result
+
+| submission | n_pairs | directional_pct | pearson_r | pearson_adj | rmse | alpha | beta |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Silicon sample (Qwen2.5-7B) | 54 | 61.111 | 0.408 | 0.563 | 3.620 | 0.014 | 0.159 |
+| Human replication (Human 2) | 54 | 66.667 | 0.514 | 0.709 | 1.682 | 0.068 | 0.436 |
+| Baseline: no effect | 54 | 50.000 |  |  | 1.537 | -0.059 | 0.000 |
+| Baseline: all positive | 54 | 55.556 |  |  | 1.865 | -0.029 | -0.029 |
+
+Read every number against the human replication row, not against 1.0.
+
+**The ordering is partly right.** A real replication of this size scores
+**r = 0.51**; our sample scores **r = 0.41** [0.11, 0.55] —
+roughly 79% of what a fresh human sample achieves. Directional
+agreement is **61%** against the replication's
+67% and a no-information floor of 50%.
+
+**The magnitudes are not.** Our effects are **2.6 times too spread out**
+(SD 3.98 pp against the real 1.55 pp), and the calibration slope is
+**β = 0.16** — the human effect is about a sixth of what we predict. The
+consequence is blunt: our **RMSE of 3.62 pp is worse than simply predicting
+no effect at all** (1.54 pp), and far worse than a real replication's
+1.68 pp.
+
+That is not a small-sample artefact. Correcting the slope for sampling noise in
+the predictions barely moves it (β_adj = 0.17, against the replication's
+0.66), so the exaggeration is not noise in our synthetic sample — the model
+genuinely believes these messages do several times more than they do. A real
+replication's slope is flattened mostly *by* its own noise; ours is flat because
+it is wrong.
+
+**What that means for a submission.** Rank-order information is real and worth
+having; predicted effect sizes are not usable as levels. On a leaderboard that
+scores correlation this sample would look respectable, and on one that scores
+RMSE or calibration it would lose to a constant zero.
+
+![Predicted against human effects](plots/01_predicted_vs_human.png)
+
+![Composite effects](plots/02_composite_effects.png)
+
+## The levels are wrong, though the spread is not
+
+Treatment effects are differences, so a constant bias cancels out of them. The
+raw response distributions have no such mercy, and they show something the effect
+metrics cannot: **the synthetic respondents sit in the wrong place on several
+scales entirely.**
+
+| outcome | mean_human | mean_synthetic | sd_human | sd_synthetic | variance_ratio | ovl | w1 | level_error |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| OppBip | 21.1 | 83.0 | 21.8 | 23.1 | 1.1 | 0.2 | 61.7 | 61.9 |
+| SocDis | 30.6 | 75.4 | 27.6 | 28.2 | 1.0 | 0.4 | 44.7 | 44.8 |
+| SUC | 53.3 | 18.1 | 23.6 | 25.8 | 1.2 | 0.4 | 35.2 | 35.2 |
+| SocDistrust | 52.6 | 74.0 | 27.7 | 30.2 | 1.2 | 0.6 | 21.6 | 21.4 |
+| BEPF | 52.1 | 34.0 | 21.4 | 25.1 | 1.4 | 0.6 | 18.1 | 18.1 |
+| ADA | 27.5 | 17.3 | 23.3 | 24.3 | 1.1 | 0.6 | 10.9 | 10.2 |
+| Composite | 39.2 | 47.3 | 12.7 | 8.8 | 0.5 | 0.6 | 8.5 | 8.0 |
+| PA | 65.8 | 62.5 | 20.1 | 24.0 | 1.4 | 0.8 | 4.8 | 3.3 |
+| SPV | 10.8 | 14.0 | 20.0 | 21.5 | 1.2 | 0.6 | 3.8 | 3.2 |
+
+Mean absolute level error across the nine outcomes is **23 points on a
+0-100 scale**. Three are worth naming. Opposition to bipartisan cooperation runs
+21 in the real sample and 83 in ours — real Americans in this sample support
+bipartisanship and our synthetic ones oppose it. Social distance is 31 against
+75. Support for undemocratic candidates goes the other way, 53 against 18.
+
+The *shape* is better than the position: the mean variance ratio is
+**1.13** (1 is perfect), so within a condition the synthetic responses are about
+as spread out as the real ones. This sample is not the degenerate,
+everyone-answers-50 failure. It is a sample of people who disagree with each
+other by roughly the right amount, about the wrong thing.
+
+## What the pieces say
+
+- **[Effects](01_effects.md)** — arm by arm, outcome by outcome, ours against theirs.
+- **[Distributions](02_distributions.md)** — whether the spread is right, not just the mean.
+- **[Subgroups](03_subgroups.md)** — where the Pfänder finding repeats. The three
+  moderators the model *could* see (gender, race, party) predict its subgroup
+  effects no better than the two it could not (age, education): pooled r of
+  0.26 against 0.24. Even with the respondent's party written into every
+  question — this instrument asks about "Republicans" and "Democrats" by name —
+  the model is not conditioning on who it is supposed to be.
+- **[Diagnostics](04_diagnostics.md)** — what the sampler did.
+
+## What this can and cannot tell us about Pfänder
+
+Three limits, all structural:
+
+1. **Different topic and year.** Voelkel is democratic norms in 2022, Pfänder is
+   climate scientists in 2026. A 2022 instrument also sits inside the model's
+   training window in a way a 2026 one does not — the model may know how this
+   study came out.
+2. **Six intervention clusters.** The pure-text rule left 6 of 27 arms, so the
+   cluster bootstrap resamples six things and every interval is wide. The human
+   replication row suffers the same thinness, which is why it, and not the
+   absolute value, is the comparison.
+3. **A subset the paper never reports.** Dropping the non-textual arms means our
+   human reference is not the study's headline result. Internally consistent, but
+   not a replication of Voelkel et al.

@@ -1,4 +1,4 @@
-# [DRAFT] Voelkel SDC — text templates, silicon sampling, and validation of the Pfänder pipeline
+# [DONE] Voelkel SDC — text templates, silicon sampling, and validation of the Pfänder pipeline
 
 Task: [voelkel_pipleline.md](../tasks/voelkel_pipleline.md)
 Prior art: [Pfänder plan](archive/2026-08-14-pfander-silicon-sampling.md) ·
@@ -303,27 +303,74 @@ next experiment, arriving for free.
 ## Steps
 
 **Phase 1 — templates**
-1. [ ] qsf parser: blocks, questions, choices, flow, timers → structured form.
-2. [ ] Modality audit over all 27 arms → `modality_audit.csv` and the retained set.
-   **Checkpoint: report the arm count before continuing.**
-3. [ ] `silicon_sampling/voelkel/` content module + party branch.
-4. [ ] Render templates + manifest + `00_FORMAT.md`.
-5. [ ] Validate every slot's legal set against the values in `Recoded.csv`.
+1. [x] qsf parser: blocks, questions, choices, flow, timers.
+2. [x] Modality audit over all 27 arms. **Came in at 6 interventions + control,
+   under the 8-arm checkpoint; confirmed with the user, who chose to stay strict.**
+3. [x] Content module, party branch, the nested outcome-battery randomisation, and
+   the correction screen that quotes the respondent's own estimates back at them.
+4. [x] 9 templates + manifest + `00_FORMAT.md` + `modality_audit.csv`.
+5. [x] Every slot's legal set validated against the values respondents actually
+   gave: 55 slots checked, no violations. 57 of 63 backbone slots map to a
+   published column; the 6 that do not are exactly the items never published.
 
 **Phase 2 — sampling**
-6. [ ] Profiles from published marginals; party pre-filled.
-7. [ ] Calibration run (~60 respondents): throughput, legality, near-miss audit.
-8. [ ] Full run (~8,000), detached and resumable.
-9. [ ] `samples.csv`; recompute the nine outcomes; validate ranges and composites.
+6. [x] 6,203 profiles from the published marginals, all reproduced within ~1%.
+7. [x] Calibration + kill test.
+8. [x] Full run: 6,203 respondents, ~1,850/h, **6.3% of draws rejected**.
+9. [x] `samples.csv`; the nine outcomes recomputed and verified.
 
 **Phase 3 — evaluation**
-10. [ ] `silicon_sampling/benchmark/` — port the scoring functions, with tests.
-11. [ ] Reproduce the paper's unweighted ATEs on the real data and check them
-    against the published effects (direction and rough magnitude) before scoring.
-12. [ ] Half-split, Human 2 reference, no-effect and all-positive baselines.
-13. [ ] Score our sample; cluster-bootstrap intervals.
-14. [ ] Write the report.
+10. [x] `silicon_sampling/benchmark/` — the benchmark's scoring in Python, 13 tests.
+11. [x] Outcome construction verified against the published columns: **max absolute
+    difference 0.0 across 31,000 respondents**, all nine.
+12. [x] Half-split, human replication reference, both null baselines.
+13. [x] Scored, with cluster-bootstrap intervals over the six interventions.
+14. [x] [`docs/reports/voelkel_validation/`](../reports/voelkel_validation/README.md).
 
 **Wrap-up**
-15. [ ] `black .`; `flake8 . --max-line-length=200 --extend-ignore=E203,W503`; tests.
-16. [ ] Archive task and plan; commit and push.
+15. [x] `black`, `flake8`, 27 tests pass.
+16. [x] Task and plan archived; committed and pushed.
+
+## Result
+
+| | silicon | human replication | no-effect baseline |
+| --- | --- | --- | --- |
+| directional agreement | 61% | 67% | 50% |
+| Pearson r | 0.41 [0.11, 0.55] | 0.51 [0.33, 0.68] | — |
+| RMSE (pp) | 3.62 | 1.68 | 1.54 |
+| calibration slope β | 0.16 | 0.44 | 0.00 |
+
+Three findings, in descending order of how much they should change what we do:
+
+1. **Rank order is real, magnitudes are not.** r = 0.41 is ~79% of what a fresh
+   human sample of the same size achieves — genuinely useful. But the effects are
+   2.6× too spread out and β = 0.16, so the RMSE is *worse than predicting no
+   effect at all*. Correcting for noise in the predictions barely moves the slope
+   (β_adj = 0.17 against the replication's 0.66), so this is not a small-sample
+   artefact: the model believes these messages do several times more than they do.
+2. **The levels are wrong even where the spread is right.** Mean absolute level
+   error is 23 points on a 0-100 scale, and two outcomes are effectively inverted
+   (opposition to bipartisan cooperation: 21 real against 83 synthetic). Yet the
+   mean variance ratio is 1.13 — within a condition the synthetic responses are
+   about as dispersed as the real ones. This is not the degenerate
+   everyone-answers-50 failure; it is people who disagree by about the right
+   amount about the wrong thing.
+3. **The Pfänder flatness result reproduces, under the strongest possible test.**
+   The moderators the model could see predict its subgroup effects no better than
+   the ones it could not (pooled r 0.26 against 0.24) — even though this
+   instrument writes the respondent's party into the wording of nearly every
+   question. Pre-filling party does *not* fix the flatness, which answers the
+   follow-up the Pfänder write-up proposed.
+
+## What this means for the Pfänder submission
+
+Take the ordering seriously and the levels not at all. On a leaderboard scoring
+correlation this approach looks respectable; on one scoring RMSE or calibration it
+loses to a constant zero. If effort goes anywhere next, it should go at the
+magnitude problem — the effects are big because the model treats a persuasive
+message as far more persuasive than it is — rather than at demographic realism,
+which pre-filling party has now been shown not to solve.
+
+The three caveats from the plan all stand: different topic and year, six
+intervention clusters so every interval is wide, and a human reference computed on
+a subset the paper never reports.
