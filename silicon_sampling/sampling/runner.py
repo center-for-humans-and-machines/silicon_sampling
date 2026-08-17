@@ -27,6 +27,7 @@ from typing import Callable, Protocol, Sequence
 from ..survey.session import Session
 from .driver import DrawLog, SamplerConfig, run_group
 from .engine import EngineConfig, VLLMEngine
+from .tokens import load_tokenizer
 
 #: Raw draws are logged in full for one respondent in this many; rejected draws
 #: are always logged.  Logging every draw would mean a million-line file.
@@ -169,6 +170,11 @@ class Runner:
         started = time.time()
         log = DrawLog()
         size = self.sampler_config.group_size
+        tokenizer = (
+            load_tokenizer(self.engine_config.model)
+            if self.sampler_config.token_id_prompts
+            else None
+        )
         with (
             self.answers_path.open("a", encoding="utf-8") as answers,
             self.draws_path.open("a", encoding="utf-8") as draws,
@@ -214,6 +220,7 @@ class Runner:
                                 self.sampler_config,
                                 [profile.seed for profile in chunk],
                                 on_draw=self._on_draw,
+                                tokenizer=tokenizer,
                             )
                         )
                         self._on_group_done(sessions)

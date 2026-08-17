@@ -12,6 +12,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from ..models import DEFAULT_RUN
+from ..sampling.engine import cache_root
+
 #: Repository root (``.../silicon_sampling``), found by walking up from this file.
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -28,8 +31,19 @@ CODEBOOK_CSV = SUBMISSION_SNAPSHOT / "codebook.csv"
 #: Rendered fill-in-the-blank templates, one per condition.
 TEMPLATES = DATA / "text_templates"
 
-#: Silicon-sampling output.
-SAMPLES = DATA / "silicon_sampling" / "qwen25_7b"
+#: Root of every model's silicon-sampling output.
+RUNS = DATA / "silicon_sampling"
+
+
+def samples_dir(run: str = DEFAULT_RUN) -> Path:
+    """Where one model's run is filed."""
+    return RUNS / run
+
+
+#: Silicon-sampling output for the default run.  The module-level names below are
+#: kept for the Qwen run that the existing reports refer to; anything that has to
+#: work for both models takes a directory instead.
+SAMPLES = samples_dir()
 RAW = SAMPLES / "raw"
 SAMPLES_CSV = SAMPLES / "samples.csv"
 TIER1_CSV = SAMPLES / "tier1_submission.csv"
@@ -38,28 +52,11 @@ RUN_META = SAMPLES / "run_meta.json"
 PROFILES_CSV = SAMPLES / "profiles.csv"
 
 
-def _cache_root() -> Path:
-    """Where vLLM and matplotlib may write.
-
-    Compiled CUDA graphs must persist across restarts — recompiling costs minutes
-    on every engine start, which a restartable run cannot afford — so this wants a
-    writable path outside the repository. ``~/.cache`` is the natural home and is
-    mounted from the host here; if it is not writable (it was root-owned in an
-    earlier build of this image) fall back to the git-ignored data tree.
-    """
-    home = Path.home() / ".cache" / "silicon_sampling"
-    try:
-        home.mkdir(parents=True, exist_ok=True)
-        probe = home / ".writable"
-        probe.touch()
-        probe.unlink()
-        return home
-    except OSError:
-        return DATA.parent / ".cache"
-
-
-#: Writable cache root for compiled graphs and plotting fonts.
-CACHE = _cache_root()
+#: Writable cache root for compiled graphs and plotting fonts.  ``~/.cache`` is the
+#: natural home and is mounted from the host here; the git-ignored data tree is the
+#: fallback for an image where it is not writable, and ``SILICON_SAMPLING_CACHE``
+#: overrides both, which is how the cluster points at a bound-in scratch path.
+CACHE = cache_root(DATA.parent / ".cache")
 
 #: Analysis output.
 REPORT = DOCS / "reports" / "pfander_silicon_sample"

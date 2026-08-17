@@ -26,6 +26,36 @@ from pathlib import Path
 from typing import Sequence
 
 
+def cache_root(fallback: Path | None = None) -> Path:
+    """Where vLLM may write compiled graphs, and matplotlib its font cache.
+
+    Compiled CUDA graphs must persist across restarts — recompiling costs minutes
+    on every engine start, which a restartable run cannot afford — so this wants a
+    writable path outside the repository.  ``SILICON_SAMPLING_CACHE`` names one
+    explicitly, which is how the cluster points at a bound-in scratch directory;
+    a container home is not always writable there.
+    """
+    candidates = []
+    explicit = os.environ.get("SILICON_SAMPLING_CACHE")
+    if explicit:
+        candidates.append(Path(explicit))
+    candidates.append(Path.home() / ".cache" / "silicon_sampling")
+    if fallback is not None:
+        candidates.append(fallback)
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe = candidate / ".writable"
+            probe.touch()
+            probe.unlink()
+            return candidate
+        except OSError:
+            continue
+    raise SystemExit(
+        "no writable cache directory; set SILICON_SAMPLING_CACHE to one"
+    )  # pragma: no cover
+
+
 def configure_runtime(root: Path, in_process: bool = True) -> None:
     """Environment vLLM needs before the engine is built.
 
@@ -49,6 +79,10 @@ def configure_runtime(root: Path, in_process: bool = True) -> None:
         issues tens of thousands of *tiny* generate calls, and in-process avoids
         an IPC round trip on each one.  It also puts engine errors in the
         caller's traceback instead of a silent stall.
+
+        Only for a single GPU.  Tensor parallelism *is* the worker processes, so
+        callers must pass ``in_process=False`` whenever
+        ``tensor_parallel_size > 1`` or the engine cannot start.
     """
     (root / "vllm").mkdir(parents=True, exist_ok=True)
     (root / "inductor").mkdir(parents=True, exist_ok=True)
@@ -99,6 +133,11 @@ def _has_weights(hub: Path) -> bool:
     return False
 
 
+def _as_prompt(prompt):
+    """vLLM's prompt form for either text or token ids."""
+    return prompt if isinstance(prompt, str) else {"prompt_token_ids": list(prompt)}
+
+
 @dataclass
 class EngineConfig:
     model: str = "Qwen/Qwen2.5-7B"
@@ -121,6 +160,14 @@ class EngineConfig:
     #: Token budget per scheduler step.  Each round prefills roughly
     #: ``group_size * 90`` new tokens, so the default is ample.
     max_num_batched_tokens: int | None = None
+    #: GPUs to shard the weights across.  Anything above 1 needs vLLM's worker
+    #: processes, so it is incompatible with the in-process engine — see
+    #: :func:`configure_runtime`.
+    tensor_parallel_size: int = 1
+    #: Route the MoE experts across ranks instead of slicing every expert.  Each
+    #: rank then streams whole expert matrices, which is the shape the decode
+    #: kernels want; only meaningful for a mixture-of-experts model.
+    enable_expert_parallel: bool = False
     seed: int = 0
     extra: dict = field(default_factory=dict)
 
@@ -151,6 +198,10 @@ class VLLMEngine:
         )
         if config.max_num_batched_tokens:
             kwargs["max_num_batched_tokens"] = config.max_num_batched_tokens
+        if config.tensor_parallel_size > 1:
+            kwargs["tensor_parallel_size"] = config.tensor_parallel_size
+        if config.enable_expert_parallel:
+            kwargs["enable_expert_parallel"] = True
         self._llm = LLM(**kwargs)
         return self
 
@@ -226,12 +277,19 @@ class VLLMEngine:
         return cls._structured_params(regex=pattern)
 
     def generate(
-        self, prompts: Sequence[str], params: Sequence[object]
+        self, prompts: Sequence[str] | Sequence[Sequence[int]], params: Sequence[object]
     ) -> list[list[str]]:
-        """Return, per prompt, the text of each sampled continuation."""
+        """Return, per prompt, the text of each sampled continuation.
+
+        Prompts may be text or token ids.  Ids skip vLLM's tokenisation of a
+        transcript the caller has already tokenised — worth ~1 µs per prompt
+        token per call, which is most of this pipeline's CPU time.
+        """
         if not prompts:
             return []
-        outputs = self._llm.generate(list(prompts), list(params), use_tqdm=False)
+        outputs = self._llm.generate(
+            [_as_prompt(prompt) for prompt in prompts], list(params), use_tqdm=False
+        )
         return [
             [completion.text for completion in output.outputs] for output in outputs
         ]

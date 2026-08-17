@@ -130,12 +130,23 @@ def score_one(
 
 
 def leaderboard(
-    human1: pd.DataFrame, human2: pd.DataFrame, synthetic: pd.DataFrame
+    human1: pd.DataFrame,
+    human2: pd.DataFrame,
+    synthetic: pd.DataFrame | dict[str, pd.DataFrame],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """The comparison table, and the reference effects it is built on."""
+    """The comparison table, and the reference effects it is built on.
+
+    ``synthetic`` may be one sample or ``{label: sample}`` for several models, in
+    which case every model gets a row above the human and baseline rows.
+    """
+    if isinstance(synthetic, pd.DataFrame):
+        synthetic = {"Silicon sample (Qwen2.5-7B)": synthetic}
     reference = effects(human1)
     rows = [
-        score_one(reference, effects(synthetic), "Silicon sample (Qwen2.5-7B)"),
+        score_one(reference, effects(sample), label)
+        for label, sample in synthetic.items()
+    ]
+    rows += [
         score_one(reference, effects(human2), "Human replication (Human 2)"),
         score_one(
             reference,
@@ -151,6 +162,71 @@ def leaderboard(
         ),
     ]
     return pd.DataFrame(rows), reference
+
+
+#: Metrics the model comparison reports, and whether higher is better.
+COMPARISON_METRICS = {
+    "directional_pct": True,
+    "pearson_r": True,
+    "pearson_adj": True,
+    "rmse": False,
+    "beta": True,
+}
+
+
+def model_comparison(
+    human1: pd.DataFrame,
+    baseline: pd.DataFrame,
+    contender: pd.DataFrame,
+    *,
+    baseline_label: str,
+    contender_label: str,
+    draws: int = 2000,
+) -> pd.DataFrame:
+    """Did the contender actually beat the baseline?  Cluster-paired intervals.
+
+    The two samples answered the same instrument about the same interventions, so
+    their errors are correlated and the *difference* is pinned down much better
+    than either score.  This resamples one set of intervention clusters and
+    rescores both, which is what makes "improved" a claim with an interval on it.
+    """
+    reference = effects(human1)
+    left = ate_pairs(reference, effects(baseline))
+    right = ate_pairs(reference, effects(contender))
+
+    def statistic(pairs: pd.DataFrame) -> dict:
+        return {
+            **M.pooled_metrics(pairs),
+            **M.run_calibration_pooled(pairs),
+        }
+
+    result = M.paired_cluster_bootstrap(left, right, statistic, draws=draws)
+    rows = []
+    for metric, higher_is_better in COMPARISON_METRICS.items():
+        delta = result.get(f"{metric}_delta")
+        if delta is None:
+            continue
+        share_above = result[f"{metric}_p_gt0"]
+        # Report the probability that the contender is *better*, which for RMSE
+        # means smaller.  Printing p(delta > 0) for an error metric would read as
+        # its own opposite.
+        p_better = share_above if higher_is_better else 1 - share_above
+        rows.append(
+            {
+                "metric": metric,
+                "higher_is_better": higher_is_better,
+                baseline_label: statistic(left).get(metric),
+                contender_label: statistic(right).get(metric),
+                "delta": delta,
+                "delta_lo": result[f"{metric}_delta_lo"],
+                "delta_hi": result[f"{metric}_delta_hi"],
+                "p_contender_better": p_better,
+            }
+        )
+    frame = pd.DataFrame(rows)
+    if len(frame):
+        frame.attrs["n_clusters"] = result.get("n_clusters")
+    return frame
 
 
 def distribution_table(human1: pd.DataFrame, synthetic: pd.DataFrame) -> pd.DataFrame:

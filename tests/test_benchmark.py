@@ -184,6 +184,82 @@ def test_cluster_bootstrap_widens_with_few_clusters():
     assert out["pearson_r_hi"] > out["pearson_r_lo"]
 
 
+def _paired_submissions(seed: int = 11):
+    """Two models scored against the same humans, sharing most of their error.
+
+    Both miss each intervention cluster in the same direction — same instrument,
+    same interventions, same reference — and differ only slightly.  This is the
+    situation the paired bootstrap exists for.
+    """
+    rng = np.random.default_rng(seed)
+    left, right = [], []
+    for cluster in range(8):
+        shared_bias = rng.normal(0, 1.5)
+        for outcome in range(6):
+            truth = rng.normal(0, 2)
+            human = truth + rng.normal(0, 0.3)  # identical in both submissions
+            common = truth + shared_bias
+            base = {
+                "condition": f"c{cluster}",
+                "outcome": outcome,
+                "se_h": 0.3,
+                "se_l": 0.5,
+            }
+            left.append(
+                {
+                    **base,
+                    "estimate_h": human,
+                    "estimate_l": common + rng.normal(0, 0.15),
+                }
+            )
+            right.append(
+                {
+                    **base,
+                    "estimate_h": human,
+                    "estimate_l": common * 0.97 + rng.normal(0, 0.15),
+                }
+            )
+    return pd.DataFrame(left), pd.DataFrame(right)
+
+
+def _pooled(pairs):
+    return {**M.pooled_metrics(pairs), **M.run_calibration_pooled(pairs)}
+
+
+def test_pairing_resolves_a_difference_separate_intervals_call_a_tie():
+    left, right = _paired_submissions()
+    alone_l = M.cluster_bootstrap(left, _pooled, draws=600)
+    alone_r = M.cluster_bootstrap(right, _pooled, draws=600)
+    paired = M.paired_cluster_bootstrap(left, right, _pooled, draws=600)
+
+    # Scored separately the two are indistinguishable: the intervals overlap.
+    assert alone_l["rmse_lo"] < alone_r["rmse_hi"]
+    assert alone_r["rmse_lo"] < alone_l["rmse_hi"]
+
+    # Paired, the difference is real and far more precisely estimated than either
+    # level — which is the whole point of resampling one set of clusters for both.
+    width_paired = paired["rmse_delta_hi"] - paired["rmse_delta_lo"]
+    width_alone = alone_l["rmse_hi"] - alone_l["rmse_lo"]
+    assert width_paired < width_alone / 5
+    assert paired["rmse_delta_hi"] < 0  # the contender really has lower error
+    assert paired["rmse_p_gt0"] < 0.05
+
+
+def test_paired_delta_is_the_difference_of_the_point_estimates():
+    left, right = _paired_submissions(seed=3)
+    paired = M.paired_cluster_bootstrap(left, right, _pooled, draws=200)
+    for metric in ("rmse", "pearson_r", "beta"):
+        expected = _pooled(right)[metric] - _pooled(left)[metric]
+        assert abs(paired[f"{metric}_delta"] - expected) < 1e-9
+    assert paired["n_clusters"] == 8
+
+
+def test_paired_bootstrap_needs_shared_clusters():
+    left, right = _paired_submissions(seed=5)
+    right = right.assign(condition=right["condition"] + "_other")
+    assert M.paired_cluster_bootstrap(left, right, _pooled, draws=50) == {}
+
+
 def main() -> int:
     tests = [
         v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)

@@ -36,15 +36,28 @@ def _interval(row, metric: str) -> str:
     return f" [{lo:.2f}, {hi:.2f}]"
 
 
-def generate(samples_csv: Path = None, out: Path = REPORT) -> dict:
+def generate(
+    samples_csv: Path = None,
+    out: Path = REPORT,
+    run_dir: Path = None,
+    label: str = None,
+) -> dict:
+    """The single-sample validation report for one model's run.
+
+    ``run_dir`` is where that run's ``run_meta.json`` lives; it defaults to the
+    Qwen run the report was first written for.  Comparing two models is a
+    different question with a different shape — see :mod:`.compare`.
+    """
     out.mkdir(parents=True, exist_ok=True)
     PLOTS.mkdir(parents=True, exist_ok=True)
+    run_dir = run_dir or SAMPLES
+    label = label or "Silicon sample (Qwen2.5-7B)"
 
-    synthetic = pd.read_csv(samples_csv or (SAMPLES / "samples.csv"), low_memory=False)
+    synthetic = pd.read_csv(samples_csv or (run_dir / "samples.csv"), low_memory=False)
     humans = S.load_humans()
     human1, human2 = half_split(humans, seed=42)
 
-    board, reference = S.leaderboard(human1, human2, synthetic)
+    board, reference = S.leaderboard(human1, human2, {label: synthetic})
     prediction = S.effects(synthetic)
     pairs = ate_pairs(reference, prediction)
     human_pairs = ate_pairs(reference, S.effects(human2))
@@ -71,6 +84,7 @@ def generate(samples_csv: Path = None, out: Path = REPORT) -> dict:
         human1,
         human2,
         synthetic,
+        run_dir,
     )
     return {
         "n_synthetic": len(synthetic),
@@ -286,6 +300,7 @@ def _write_reports(
     human1,
     human2,
     synthetic,
+    run_dir,
 ) -> None:
     # How much true effect there is to predict, against the noise of a half
     # sample: the two are close here, which is why the zero-predictor is strong.
@@ -578,7 +593,7 @@ means are wrong across groups.
 """
     (out / "03_subgroups.md").write_text(sub_md, encoding="utf-8")
 
-    meta_path = SAMPLES / "run_meta.json"
+    meta_path = run_dir / "run_meta.json"
     meta = (
         json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
     )

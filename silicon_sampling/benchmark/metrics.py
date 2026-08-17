@@ -184,6 +184,71 @@ def signed_metrics(pairs: pd.DataFrame) -> dict:
     return out
 
 
+def paired_cluster_bootstrap(
+    baseline: pd.DataFrame,
+    contender: pd.DataFrame,
+    statistic,
+    cluster: str = "condition",
+    draws: int = 2000,
+    seed: int = 42,
+) -> dict:
+    """Interval on ``statistic(contender) - statistic(baseline)``, cluster-paired.
+
+    Two models scored against the same humans do not have independent errors:
+    they answered the *same* instrument about the *same* interventions, so most of
+    what moves one score moves the other.  Bootstrapping each separately and
+    eyeballing whether the intervals overlap throws that pairing away and will
+    call a real difference inconclusive — the difference is estimated far more
+    precisely than either level.  So each draw resamples one set of clusters and
+    scores *both* submissions on it.
+
+    Returns ``<metric>_delta`` (the point difference), its interval, and
+    ``<metric>_p_gt0``, the share of draws in which the contender scored higher —
+    a one-sided bootstrap p-value in either tail.
+    """
+    rng = np.random.default_rng(seed)
+    shared = sorted(set(baseline[cluster].unique()) & set(contender[cluster].unique()))
+    if len(shared) < 2:
+        return {}
+    left = {name: group for name, group in baseline.groupby(cluster) if name in shared}
+    right = {
+        name: group for name, group in contender.groupby(cluster) if name in shared
+    }
+
+    deltas: list[dict] = []
+    for _ in range(draws):
+        picked = [shared[i] for i in rng.choice(len(shared), len(shared), replace=True)]
+        try:
+            before = statistic(pd.concat([left[k] for k in picked], ignore_index=True))
+            after = statistic(pd.concat([right[k] for k in picked], ignore_index=True))
+        except Exception:  # pragma: no cover - a degenerate resample
+            continue
+        deltas.append(
+            {
+                key: after[key] - before[key]
+                for key in before
+                if isinstance(before.get(key), (int, float))
+                and not isinstance(before.get(key), bool)
+                and isinstance(after.get(key), (int, float))
+            }
+        )
+    if not deltas:
+        return {}
+
+    point_before, point_after = statistic(baseline), statistic(contender)
+    frame = pd.DataFrame(deltas)
+    out: dict = {"n_clusters": len(shared)}
+    for column in frame.columns:
+        values = pd.to_numeric(frame[column], errors="coerce").dropna()
+        if len(values) < 10:
+            continue
+        out[f"{column}_delta"] = float(point_after[column] - point_before[column])
+        out[f"{column}_delta_lo"] = float(values.quantile(0.025))
+        out[f"{column}_delta_hi"] = float(values.quantile(0.975))
+        out[f"{column}_p_gt0"] = float((values > 0).mean())
+    return out
+
+
 def cluster_bootstrap(
     pairs: pd.DataFrame,
     statistic,

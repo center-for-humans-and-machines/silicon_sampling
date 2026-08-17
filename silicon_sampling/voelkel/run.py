@@ -6,6 +6,7 @@ import random
 
 from ..sampling.driver import token_budget
 from ..sampling.runner import Runner
+from ..sampling.tokens import load_tokenizer
 from ..survey.render import walk
 from ..survey.session import Session
 from ..survey.slots import ChoiceSlot, FreeTextSlot, IntSlot, Slot
@@ -105,9 +106,7 @@ def _all_slots() -> dict[str, Slot]:
 
 
 def fit_token_budgets(model: str) -> dict[str, int]:
-    from transformers import AutoTokenizer
-
-    tokenizer = AutoTokenizer.from_pretrained(model)
+    tokenizer = load_tokenizer(model)
     return {
         slot_id: token_budget(slot, tokenizer) for slot_id, slot in _all_slots().items()
     }
@@ -123,18 +122,13 @@ def _widest(slot: Slot):
     return ""
 
 
-def max_transcript_tokens(model: str, shard: str | None = None) -> int:
-    """Worst-case transcript length, for the condition named by ``shard``.
+def worst_case_sessions(shard: str | None = None):
+    """A fresh session per (condition, party, scenario) combination.
 
-    Sized per condition because one arm (`Party_Overlap`) runs to twice the
-    length of the rest; sizing every group to that worst case would halve the
-    concurrency of the six short arms for no reason.
+    Shared by the transcript-length sizing below and by the tokenisation test, so
+    both cover the same combinations.
     """
-    from transformers import AutoTokenizer
-
-    tokenizer = AutoTokenizer.from_pretrained(model)
     conditions = [c for c in inst.CONDITIONS if shard is None or c.lower() == shard]
-    longest = 0
     for condition in conditions:
         for party in ("Republican", "Democrat"):
             scenarios = (
@@ -143,15 +137,14 @@ def max_transcript_tokens(model: str, shard: str | None = None) -> int:
                 else (None,)
             )
             for scenario in scenarios:
-                elements = inst.elements_for(
-                    condition,
-                    party,
-                    battery=inst.post_order(random.Random(0)),
-                    scenario=scenario,
-                )
-                session = Session(
+                yield Session(
                     header=inst.header("v00000", condition),
-                    elements=elements,
+                    elements=inst.elements_for(
+                        condition,
+                        party,
+                        battery=inst.post_order(random.Random(0)),
+                        scenario=scenario,
+                    ),
                     answers={
                         **inst.PARTY_PIPES[party],
                         "Party_Gen": party,
@@ -161,16 +154,24 @@ def max_transcript_tokens(model: str, shard: str | None = None) -> int:
                     },
                     derive=inst.derive,
                 )
-                while (step := session.next_prompt()) is not None:
-                    session.submit(step[1], _widest(step[1]))
-                longest = max(
-                    longest,
-                    len(
-                        tokenizer(session.transcript(), add_special_tokens=False)[
-                            "input_ids"
-                        ]
-                    ),
-                )
+
+
+def max_transcript_tokens(model: str, shard: str | None = None) -> int:
+    """Worst-case transcript length, for the condition named by ``shard``.
+
+    Sized per condition because one arm (`Party_Overlap`) runs to twice the
+    length of the rest; sizing every group to that worst case would halve the
+    concurrency of the six short arms for no reason.
+    """
+    tokenizer = load_tokenizer(model)
+    longest = 0
+    for session in worst_case_sessions(shard):
+        while (step := session.next_prompt()) is not None:
+            session.submit(step[1], _widest(step[1]))
+        longest = max(
+            longest,
+            len(tokenizer(session.transcript(), add_special_tokens=False)["input_ids"]),
+        )
     return int(longest * 1.05)
 
 

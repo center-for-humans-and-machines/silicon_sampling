@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..models import DEFAULT_RUN
+
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data" / "Voelkel"
 DOCS = ROOT / "docs"
@@ -18,7 +20,17 @@ OUTCOME_NAMES = DATA / "Data" / "SDC - Data - Outcome Names.csv"
 TEMPLATES = DATA / "text_templates"
 MODALITY_AUDIT = TEMPLATES / "modality_audit.csv"
 
-SAMPLES = DATA / "silicon_sampling" / "qwen25_7b"
+#: Root of every model's silicon-sampling output.
+RUNS = DATA / "silicon_sampling"
+
+
+def samples_dir(run: str = DEFAULT_RUN) -> Path:
+    """Where one model's run is filed."""
+    return RUNS / run
+
+
+#: The default run.  Anything that has to work for both models takes a directory.
+SAMPLES = samples_dir()
 SAMPLES_CSV = SAMPLES / "samples.csv"
 PROFILES_CSV = SAMPLES / "profiles.csv"
 

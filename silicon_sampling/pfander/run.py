@@ -16,6 +16,7 @@ from typing import Sequence
 
 from ..sampling.driver import DrawLog, SamplerConfig, run_group, token_budget
 from ..sampling.engine import EngineConfig, VLLMEngine
+from ..sampling.tokens import load_tokenizer
 from ..survey.session import Session
 from ..survey.slots import Slot
 from . import build, instrument, outcomes, templates
@@ -69,12 +70,40 @@ def _walk_slots(elements):
 
 def fit_token_budgets(model: str) -> dict[str, int]:
     """Per-slot token budgets, measured with the model's own tokenizer."""
-    from transformers import AutoTokenizer
-
-    tokenizer = AutoTokenizer.from_pretrained(model)
+    tokenizer = load_tokenizer(model)
     return {
         slot_id: token_budget(slot, tokenizer) for slot_id, slot in all_slots().items()
     }
+
+
+def widest_answer(slot: Slot):
+    """The longest answer a slot can legally carry, for worst-case sizing."""
+    from ..survey.slots import ChoiceSlot, FreeTextSlot, IntSlot
+
+    if isinstance(slot, ChoiceSlot):
+        return max(slot.options, key=len)
+    if isinstance(slot, IntSlot):
+        return max((slot.lo, slot.hi), key=lambda value: len(str(value)))
+    if isinstance(slot, FreeTextSlot):
+        # The comment box is the only unbounded slot.  Real prose tokenises denser
+        # than a run of identical characters, so a placeholder here *understates*
+        # the length — hence the margin applied in max_transcript_tokens.
+        return "x " * min(slot.max_chars // 2, slot.max_tokens)
+    return ""  # pragma: no cover - every slot type is covered above
+
+
+def worst_case_sessions(shard: str | None = None):
+    """A fresh session per condition.
+
+    Shared by the transcript-length sizing below and by the tokenisation test, so
+    both cover the same conditions.
+    """
+    for condition in templates.conditions.CONDITIONS:
+        if shard is not None and slug(condition) != shard:
+            continue
+        yield build.make_session(
+            "p00000", condition, code_name=build.template_code_name(condition)
+        )
 
 
 def max_transcript_tokens(model: str, shard: str | None = None) -> int:
@@ -85,31 +114,11 @@ def max_transcript_tokens(model: str, shard: str | None = None) -> int:
     condition to completion with the widest legal answer in every slot, then
     tokenising — cheap, and it needs no GPU.
     """
-    from transformers import AutoTokenizer
-
-    from ..survey.slots import ChoiceSlot, FreeTextSlot, IntSlot
-
-    tokenizer = AutoTokenizer.from_pretrained(model)
-
-    def widest(slot):
-        if isinstance(slot, ChoiceSlot):
-            return max(slot.options, key=len)
-        if isinstance(slot, IntSlot):
-            return max((slot.lo, slot.hi), key=lambda value: len(str(value)))
-        if isinstance(slot, FreeTextSlot):
-            # The comment box is the only unbounded slot.  Real prose tokenises
-            # denser than a run of identical characters, so a placeholder here
-            # *understates* the length — hence the margin applied below.
-            return "x " * min(slot.max_chars // 2, slot.max_tokens)
-        return ""  # pragma: no cover - every slot type is covered above
-
+    tokenizer = load_tokenizer(model)
     longest = 0
-    for condition in templates.conditions.CONDITIONS:
-        session = build.make_session(
-            "p00000", condition, code_name=build.template_code_name(condition)
-        )
+    for session in worst_case_sessions():
         while (step := session.next_prompt()) is not None:
-            session.submit(step[1], widest(step[1]))
+            session.submit(step[1], widest_answer(step[1]))
         longest = max(
             longest,
             len(tokenizer(session.transcript(), add_special_tokens=False)["input_ids"]),
@@ -257,6 +266,11 @@ class Runner:
         started = time.time()
         log = DrawLog()
         size = self.sampler_config.group_size
+        tokenizer = (
+            load_tokenizer(self.engine_config.model)
+            if self.sampler_config.token_id_prompts
+            else None
+        )
         with (
             self.answers_path.open("a", encoding="utf-8") as answers,
             self.draws_path.open("a", encoding="utf-8") as draws,
@@ -295,6 +309,7 @@ class Runner:
                             self.sampler_config,
                             [profile.seed for profile in chunk],
                             on_draw=self._on_draw,
+                            tokenizer=tokenizer,
                         )
                     )
                     self._on_group_done(sessions, log)

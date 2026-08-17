@@ -27,6 +27,7 @@ from typing import Callable, Iterable, Sequence
 from ..survey.session import Session
 from ..survey.slots import ChoiceSlot, FreeTextSlot, IntSlot, Slot
 from .engine import VLLMEngine
+from .tokens import PrefixTokens, encoder
 
 
 def token_budget(slot: Slot, tokenizer) -> int:
@@ -60,6 +61,11 @@ class SamplerConfig:
     use_structured_fallback: bool = True
     #: Sessions stepped in lockstep.  Bounded by KV cache capacity, not by VRAM.
     group_size: int = 24
+    #: Submit prompts as token ids the caller tokenised incrementally, instead of
+    #: handing vLLM the whole transcript as text to re-tokenise every step.  Off
+    #: is the slower path, kept as an escape hatch for a tokenizer that fails
+    #: :func:`~silicon_sampling.sampling.tokens.verify`.
+    token_id_prompts: bool = True
     #: Per-slot token budgets, from :func:`token_budget`.  Empty means use each
     #: slot's own declared ``max_tokens``.
     max_tokens_by_slot: dict = field(default_factory=dict)
@@ -128,11 +134,29 @@ def run_group(
     seeds: Sequence[int],
     log: DrawLog | None = None,
     on_draw: Callable[[Session, Slot, str, list, int], None] | None = None,
+    tokenizer=None,
 ) -> DrawLog:
-    """Step a group of sessions to completion, in lockstep."""
+    """Step a group of sessions to completion, in lockstep.
+
+    With a ``tokenizer``, each session's prompt is tokenised incrementally and
+    submitted as ids; the cache lives and dies with the group, so nothing
+    accumulates across a run.  Without one, prompts go as text and vLLM
+    re-tokenises the whole transcript every step.
+    """
     log = log or DrawLog()
     started = time.time()
     step = 0
+    encode = encoder(tokenizer) if tokenizer is not None else None
+    caches: dict[int, PrefixTokens] = {}
+
+    def submit(items):
+        """Prompts in the form the engine should receive them."""
+        if encode is None:
+            return [prompt for *_, prompt in items]
+        return [
+            caches.setdefault(index, PrefixTokens(encode)).ids(prompt)
+            for index, _, _, prompt in items
+        ]
 
     while True:
         pending: list[tuple[int, Session, Slot, str]] = []
@@ -155,7 +179,7 @@ def run_group(
                 )
                 for index, _, slot, _ in pending
             ]
-            results = engine.generate([prompt for *_, prompt in pending], params)
+            results = engine.generate(submit(pending), params)
             log.calls += len(pending)
             log.draws += sum(len(group) for group in results)
 
@@ -189,7 +213,7 @@ def run_group(
                     )
                 )
             if usable:
-                results = engine.generate([prompt for *_, prompt in usable], params)
+                results = engine.generate(submit(usable), params)
                 log.calls += len(usable)
                 log.structured_fallbacks += len(usable)
                 resolved = set()
@@ -240,6 +264,7 @@ def run_sessions(
     config: SamplerConfig | None = None,
     on_group_done: Callable[[Sequence[Session], DrawLog], None] | None = None,
     on_draw: Callable[[Session, Slot, str, list, int], None] | None = None,
+    tokenizer=None,
 ) -> DrawLog:
     """Run every session, one cache-sized group at a time."""
     config = config or SamplerConfig()
@@ -247,7 +272,9 @@ def run_sessions(
     for start in range(0, len(sessions), config.group_size):
         group = sessions[start : start + config.group_size]
         group_seeds = seeds[start : start + config.group_size]
-        log = run_group(engine, group, config, group_seeds, on_draw=on_draw)
+        log = run_group(
+            engine, group, config, group_seeds, on_draw=on_draw, tokenizer=tokenizer
+        )
         total.merge(log)
         if on_group_done:
             on_group_done(group, log)
