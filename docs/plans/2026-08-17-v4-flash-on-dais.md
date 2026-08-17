@@ -149,7 +149,27 @@ Note that `fit_token_budgets()` and `max_transcript_tokens()` re-measure with th
 run's own tokenizer, so per-slot budgets and worst-case lengths recompute for
 V4-Flash automatically. They need the tokenizer, so they run on the cluster.
 
-### 4. Pilot on DAIS (1 node, 8×H200)
+### 3a. Two DAIS submission facts, learned the hard way
+
+Both cost a failed job, so they are written down here.
+
+- **`program_call` must start with `-c pass;`.** The slurm template hardcodes
+  `export CMD="python $program_call"`, and *neither* allowed container image ships
+  a `python` binary — only `python3`. So the real command goes after a
+  semicolon: `-c pass; python3 -m silicon_sampling...`, which lets the broken
+  `python -c pass` fail harmlessly first. This is already the convention in this
+  project's earlier cluster runs (`glm52_annotation_*`), so it is the house style
+  rather than an invention.
+- **`mem` must be explicit and within 250 GB / 12 cores *per GPU*.** The skill's
+  documented `--mem 0` default is rejected outright for shared jobs, and a 4-GPU
+  job is capped at 48 cores. A 4×H200 job wants `n_cpu: 48, mem: "800G"`.
+
+Also worth knowing: a pending job reporting *"Nodes required for job are DOWN,
+DRAINED or reserved for jobs in higher priority partitions"* is usually just
+contention — the same request started a few minutes later. Both `h200` and `b200`
+nodes accept jobs.
+
+### 4. Pilot on DAIS (1 node, 4×H200)
 
 `sync_to_cluster`, then a short interactive or batch job sampling ~64 Pfänder
 respondents stratified across arms, at group size 64. Confirm and record:

@@ -13,7 +13,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from ..models import DEFAULT_RUN, MODELS, model_id
+from ..models import DEFAULT_RUN, MODELS, engine_defaults, model_id
 from ..sampling.driver import SamplerConfig
 from ..sampling.engine import EngineConfig
 from . import paths, profiles, templates, validate
@@ -86,7 +86,12 @@ def main(argv: list[str] | None = None) -> int:
     sample.add_argument(
         "--model", default=None, help="override the run key's Hugging Face id"
     )
-    sample.add_argument("--kv-cache-dtype", default="auto", choices=["auto", "fp8"])
+    sample.add_argument(
+        "--kv-cache-dtype",
+        default=None,
+        choices=["auto", "fp8", "fp8_ds_mla"],
+        help="default: whatever the run key requires (see models.ENGINE_DEFAULTS)",
+    )
     sample.add_argument("--max-model-len", type=int, default=8192)
     sample.add_argument("--gpu-memory-utilization", type=float, default=0.92)
     sample.add_argument("--max-num-seqs", type=int, default=512)
@@ -123,6 +128,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     csv_cmd.add_argument("--out", default=None)
     csv_cmd.add_argument("--run", default=DEFAULT_RUN)
+
+    cmp_cmd = sub.add_parser(
+        "compare", help="one model's run against another (docs/reports/...)"
+    )
+    cmp_cmd.add_argument(
+        "--runs",
+        nargs="+",
+        default=["qwen25_7b", "v4_flash"],
+        help="run keys, baseline first",
+    )
+    cmp_cmd.add_argument("--out", default=None)
 
     stats_cmd = sub.add_parser(
         "stats", help="live throughput and illegal-generation rate of a run"
@@ -170,7 +186,10 @@ def main(argv: list[str] | None = None) -> int:
                 model=args.model or model_id(args.run),
                 max_model_len=args.max_model_len,
                 gpu_memory_utilization=args.gpu_memory_utilization,
-                kv_cache_dtype=args.kv_cache_dtype,
+                kv_cache_dtype=(
+                    args.kv_cache_dtype
+                    or engine_defaults(args.run).get("kv_cache_dtype", "auto")
+                ),
                 enforce_eager=args.enforce_eager,
                 max_num_seqs=args.max_num_seqs,
                 tensor_parallel_size=tp,
@@ -191,6 +210,22 @@ def main(argv: list[str] | None = None) -> int:
         out = Path(args.out) if args.out else paths.samples_dir(args.run)
         summary = build_csvs(out)
         print(summary)
+        return 0
+
+    if args.command == "compare":
+        from .compare import generate
+
+        if len(args.runs) < 2:
+            raise SystemExit("compare needs at least two run keys")
+        result = generate(
+            args.runs,
+            out=Path(args.out) if args.out else paths.REPORT,
+            baseline=args.runs[0],
+            contender=args.runs[1],
+        )
+        print(result["agreement"].to_string(index=False))
+        print()
+        print(result["demographics"].to_string(index=False))
         return 0
 
     if args.command == "stats":

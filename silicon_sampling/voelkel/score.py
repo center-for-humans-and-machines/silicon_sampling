@@ -174,6 +174,17 @@ COMPARISON_METRICS = {
 }
 
 
+def share_better(share_above_zero: float, higher_is_better: bool) -> float:
+    """Turn ``p(delta > 0)`` into ``p(contender is better)``.
+
+    Half these metrics improve by going up and RMSE improves by going down, so the
+    raw bootstrap share means opposite things depending on the row.  Reporting it
+    unflipped would print an error metric's *worst* result as its best, which is
+    the kind of mistake that survives review because the number looks reasonable.
+    """
+    return share_above_zero if higher_is_better else 1.0 - share_above_zero
+
+
 def model_comparison(
     human1: pd.DataFrame,
     baseline: pd.DataFrame,
@@ -206,11 +217,7 @@ def model_comparison(
         delta = result.get(f"{metric}_delta")
         if delta is None:
             continue
-        share_above = result[f"{metric}_p_gt0"]
-        # Report the probability that the contender is *better*, which for RMSE
-        # means smaller.  Printing p(delta > 0) for an error metric would read as
-        # its own opposite.
-        p_better = share_above if higher_is_better else 1 - share_above
+        p_better = share_better(result[f"{metric}_p_gt0"], higher_is_better)
         rows.append(
             {
                 "metric": metric,

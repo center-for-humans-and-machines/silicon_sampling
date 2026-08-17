@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from ..models import DEFAULT_RUN, MODELS, model_id
+from ..models import DEFAULT_RUN, MODELS, engine_defaults, model_id
 from ..sampling.driver import SamplerConfig
 from ..sampling.engine import EngineConfig, cache_root
 from . import paths, profiles
@@ -41,6 +41,12 @@ def main(argv: list[str] | None = None) -> int:
     sample.add_argument("--gpu-memory-utilization", type=float, default=0.90)
     sample.add_argument("--max-num-seqs", type=int, default=128)
     sample.add_argument("--max-num-batched-tokens", type=int, default=4096)
+    sample.add_argument(
+        "--kv-cache-dtype",
+        default=None,
+        choices=["auto", "fp8", "fp8_ds_mla"],
+        help="default: whatever the run key requires (see models.ENGINE_DEFAULTS)",
+    )
     sample.add_argument(
         "--tensor-parallel-size",
         type=int,
@@ -81,6 +87,18 @@ def main(argv: list[str] | None = None) -> int:
         default=[DEFAULT_RUN],
         help="run keys to score; more than one puts both models on the board",
     )
+
+    cmp_cmd = sub.add_parser(
+        "compare", help="one model's run against another, scored against humans"
+    )
+    cmp_cmd.add_argument(
+        "--runs",
+        nargs="+",
+        default=["qwen25_7b", "v4_flash"],
+        help="run keys, baseline first",
+    )
+    cmp_cmd.add_argument("--out", default=None)
+    cmp_cmd.add_argument("--draws", type=int, default=2000)
 
     args = parser.parse_args(argv)
 
@@ -128,6 +146,10 @@ def main(argv: list[str] | None = None) -> int:
                 enforce_eager=args.enforce_eager,
                 max_num_seqs=args.max_num_seqs,
                 max_num_batched_tokens=args.max_num_batched_tokens,
+                kv_cache_dtype=(
+                    args.kv_cache_dtype
+                    or engine_defaults(args.run).get("kv_cache_dtype", "auto")
+                ),
                 tensor_parallel_size=tp,
                 enable_expert_parallel=args.expert_parallel,
             ),
@@ -145,6 +167,23 @@ def main(argv: list[str] | None = None) -> int:
 
         summary = build_csv(Path(args.out) if args.out else paths.samples_dir(args.run))
         print(summary)
+        return 0
+
+    if args.command == "compare":
+        from .compare import generate
+
+        if len(args.runs) < 2:
+            raise SystemExit("compare needs at least two run keys")
+        result = generate(
+            args.runs,
+            out=Path(args.out) if args.out else paths.REPORT,
+            baseline=args.runs[0],
+            contender=args.runs[1],
+            draws=args.draws,
+        )
+        print(result["board"].to_string(index=False))
+        print()
+        print(result["verdict"].to_string(index=False))
         return 0
 
     if args.command == "score":
