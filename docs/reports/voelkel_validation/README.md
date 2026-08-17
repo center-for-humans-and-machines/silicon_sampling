@@ -62,6 +62,37 @@ RMSE or calibration it would lose to a constant zero.
 
 ![Predicted against human effects](plots/01_predicted_vs_human.png)
 
+### How to read that figure
+
+**The identity line is the target, but a slope of 1 is not what a good predictor
+produces here.** Both axes are noisy estimates of the same unobservable truth, and
+regressing one noisy quantity on another attenuates the slope toward zero:
+conditioning on a large predicted effect selects cases where the predictor's noise
+happened to land positive, so the truth behind them — and hence the human
+measurement of it — is smaller. The fitted slope is the *reliability* of the
+x-axis, `var(true) / (var(true) + var(noise))`, not 1.
+
+That matters because **attenuation depends only on the x-axis, which is different
+for each row**:
+
+| | x-axis reliability | raw slope | noise removed |
+| --- | --- | --- | --- |
+| silicon sample | 0.92 | 0.16 | **0.17** |
+| human replication | 0.67 | 0.44 | **0.66** |
+
+The human replication's effects are 33% sampling noise, ours only 8%. So the
+solid red line is dragged flat by something that barely touches the solid blue
+one, and comparing the two by eye understates the gap — it reads as a
+2.7x difference when the real one is 3.8x. The dashed lines remove each
+predictor's own noise: the red one springs up near identity, which is where an
+unbiased-but-noisy predictor belongs, while the blue one barely moves.
+
+**Why not simply plot against the true effects, where the ceiling would be
+obvious?** Because they are not observable. Every candidate x-axis is itself an
+estimate: the half sample used here is 53% reliable, and even the *full* human
+sample is only 69%. There is no noise-free axis to plot against, which is why
+the correction is applied to the slope rather than to the data.
+
 ![Composite effects](plots/02_composite_effects.png)
 
 ## The levels are wrong, though the spread is not

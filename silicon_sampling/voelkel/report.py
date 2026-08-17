@@ -132,18 +132,46 @@ def _plots(
         lw=1.2,
         label="silicon sample",
     )
+    # Solid line: the raw calibration slope, which is what the benchmark reports.
+    # Dashed: the same slope with the *predictor's* own sampling noise removed.
+    # That correction matters because attenuation depends only on the x-axis, and
+    # the x-axis differs by submission — the human replication's effects are 33%
+    # noise, ours are 8% — so the raw lines are not comparable by eye.
+    grid = np.linspace(-limit, limit, 10)
     for frame, colour in ((pairs, viz.BLUE), (human_pairs, viz.RED)):
         clean = frame.dropna(subset=["estimate_h", "estimate_l"])
-        if len(clean) > 2:
-            slope, intercept = np.polyfit(clean["estimate_l"], clean["estimate_h"], 1)
-            grid = np.linspace(-limit, limit, 10)
-            ax.plot(grid, intercept + slope * grid, color=colour, lw=2.0)
+        if len(clean) <= 2:
+            continue
+        slope, intercept = np.polyfit(clean["estimate_l"], clean["estimate_h"], 1)
+        ax.plot(grid, intercept + slope * grid, color=colour, lw=2.0)
+        x = clean["estimate_l"].to_numpy(float)
+        noise = (
+            np.nanmean(clean["se_l"].to_numpy(float) ** 2)
+            if "se_l" in clean
+            else np.nan
+        )
+        reliability = 1 - noise / x.var(ddof=1) if x.var(ddof=1) > 0 else np.nan
+        if np.isfinite(reliability) and reliability > 0:
+            centre_x, centre_y = x.mean(), clean["estimate_h"].mean()
+            ax.plot(
+                grid,
+                centre_y + (slope / reliability) * (grid - centre_x),
+                color=colour,
+                lw=1.6,
+                ls=(0, (5, 3)),
+                alpha=0.85,
+            )
     ax.set_xlim(-limit, limit)
     ax.set_ylim(-limit, limit)
     ax.set_xlabel("predicted effect (pp of scale range)")
     ax.set_ylabel("human effect, Human 1 (pp of scale range)")
     ax.set_title("Predicted against human treatment effects")
-    ax.legend(loc="upper left")
+    from matplotlib.lines import Line2D
+
+    handles, labels = ax.get_legend_handles_labels()
+    handles.append(Line2D([], [], color=viz.TEXT_MUTED, lw=1.6, ls=(0, (5, 3))))
+    labels.append("same slope, predictor noise removed")
+    ax.legend(handles, labels, loc="upper left", fontsize=8.5)
     viz.save(fig, PLOTS / "01_predicted_vs_human.png")
 
     # Effects arm by arm, ours against theirs, for the composite outcome.
@@ -300,6 +328,19 @@ def _write_reports(
     vis_r = float(visible.mean()) if len(visible) else float("nan")
     invis_r = float(invisible.mean()) if len(invisible) else float("nan")
 
+    def _reliability(frame):
+        x = frame["estimate_l"].to_numpy(float)
+        noise = np.nanmean(frame["se_l"].to_numpy(float) ** 2)
+        return 1 - noise / x.var(ddof=1) if x.var(ddof=1) > 0 else float("nan")
+
+    syn_rel = _reliability(pairs)
+    hum_rel = _reliability(human_pairs)
+    # How good a stand-in for the truth is even obtainable, for the note below.
+    true_var = max(pairs["estimate_h"].var(ddof=1) - noise_var, 0.0)
+    full_noise = float(np.mean(S.effects(pd.concat([human1, human2]))["se"] ** 2))
+    half_rel = true_var / (true_var + noise_var) if true_var > 0 else float("nan")
+    full_rel = true_var / (true_var + full_noise) if true_var > 0 else float("nan")
+
     ours = board[board["submission"].str.startswith("Silicon")].iloc[0]
     theirs = board[board["submission"].str.startswith("Human")].iloc[0]
     null_row = board[board["submission"].str.contains("no effect")].iloc[0]
@@ -362,6 +403,37 @@ scores correlation this sample would look respectable, and on one that scores
 RMSE or calibration it would lose to a constant zero.
 
 ![Predicted against human effects](plots/01_predicted_vs_human.png)
+
+### How to read that figure
+
+**The identity line is the target, but a slope of 1 is not what a good predictor
+produces here.** Both axes are noisy estimates of the same unobservable truth, and
+regressing one noisy quantity on another attenuates the slope toward zero:
+conditioning on a large predicted effect selects cases where the predictor's noise
+happened to land positive, so the truth behind them — and hence the human
+measurement of it — is smaller. The fitted slope is the *reliability* of the
+x-axis, `var(true) / (var(true) + var(noise))`, not 1.
+
+That matters because **attenuation depends only on the x-axis, which is different
+for each row**:
+
+| | x-axis reliability | raw slope | noise removed |
+| --- | --- | --- | --- |
+| silicon sample | {syn_rel:.2f} | {ours['beta']:.2f} | **{ours['beta_adj']:.2f}** |
+| human replication | {hum_rel:.2f} | {theirs['beta']:.2f} | **{theirs['beta_adj']:.2f}** |
+
+The human replication's effects are {1 - hum_rel:.0%} sampling noise, ours only {1 - syn_rel:.0%}. So the
+solid red line is dragged flat by something that barely touches the solid blue
+one, and comparing the two by eye understates the gap — it reads as a
+{theirs['beta'] / ours['beta']:.1f}x difference when the real one is {theirs['beta_adj'] / ours['beta_adj']:.1f}x. The dashed lines remove each
+predictor's own noise: the red one springs up near identity, which is where an
+unbiased-but-noisy predictor belongs, while the blue one barely moves.
+
+**Why not simply plot against the true effects, where the ceiling would be
+obvious?** Because they are not observable. Every candidate x-axis is itself an
+estimate: the half sample used here is {half_rel:.0%} reliable, and even the *full* human
+sample is only {full_rel:.0%}. There is no noise-free axis to plot against, which is why
+the correction is applied to the slope rather than to the data.
 
 ![Composite effects](plots/02_composite_effects.png)
 
