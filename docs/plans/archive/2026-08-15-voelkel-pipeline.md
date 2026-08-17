@@ -344,10 +344,15 @@ Three findings, in descending order of how much they should change what we do:
 
 1. **Rank order is real, magnitudes are not.** r = 0.41 is ~79% of what a fresh
    human sample of the same size achieves — genuinely useful. But the effects are
-   2.6× too spread out and β = 0.16, so the RMSE is *worse than predicting no
-   effect at all*. Correcting for noise in the predictions barely moves the slope
-   (β_adj = 0.17 against the replication's 0.66), so this is not a small-sample
-   artefact: the model believes these messages do several times more than they do.
+   2.6× too spread out and β = 0.16, and the RMSE is 3.62 pp against 1.68 for a
+   replication and 1.54 for predicting nothing. Note what that baseline means
+   here: the true effect SD (1.12 pp) is barely above the per-effect standard
+   error (1.07 pp), so shrinking to zero is near-optimal and the replication does
+   not clearly beat it either. The damning part is the *size* of our gap — 2.4×
+   the baseline, with an interval excluding it. Correcting for noise in the
+   predictions barely moves the slope (β_adj = 0.17 against the replication's
+   0.66), so this is not a small-sample artefact: the model believes these
+   messages do several times more than they do.
 2. **The levels are wrong even where the spread is right.** Mean absolute level
    error is 23 points on a 0-100 scale, and two outcomes are effectively inverted
    (opposition to bipartisan cooperation: 21 real against 83 synthetic). Yet the

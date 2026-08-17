@@ -259,6 +259,11 @@ def _write_reports(
     human2,
     synthetic,
 ) -> None:
+    # How much true effect there is to predict, against the noise of a half
+    # sample: the two are close here, which is why the zero-predictor is strong.
+    noise_var = float(np.mean(pairs["se_h"].to_numpy(float) ** 2))
+    true_sd = float(np.sqrt(max(pairs["estimate_h"].var(ddof=1) - noise_var, 0.0)))
+    noise_sd = float(np.sqrt(noise_var))
     sd_human = float(pairs["estimate_h"].std())
     sd_synth = float(pairs["estimate_l"].std())
     sd_ratio = sd_synth / sd_human if sd_human else float("nan")
@@ -325,10 +330,24 @@ agreement is **{ours['directional_pct']:.0f}%** against the replication's
 
 **The magnitudes are not.** Our effects are **{sd_ratio:.1f} times too spread out**
 (SD {sd_synth:.2f} pp against the real {sd_human:.2f} pp), and the calibration slope is
-**β = {ours['beta']:.2f}** — the human effect is about a sixth of what we predict. The
-consequence is blunt: our **RMSE of {ours['rmse']:.2f} pp is worse than simply predicting
-no effect at all** ({null_row['rmse']:.2f} pp), and far worse than a real replication's
-{theirs['rmse']:.2f} pp.
+**β = {ours['beta']:.2f}** — the human effect is about a sixth of what we predict. Our RMSE is
+**{ours['rmse']:.2f} pp**{_interval(ours, 'rmse')}, against a real replication's {theirs['rmse']:.2f} pp{_interval(theirs, 'rmse')}
+and {null_row['rmse']:.2f} pp for predicting no effect at all.
+
+**Read the RMSE column carefully — the zero-predictor is a strong baseline here,
+not a weak one.** The true effects in these six arms are barely larger than the
+noise in a half sample of this size: true effect SD is **{true_sd:.2f} pp** against a
+per-effect standard error of **{noise_sd:.2f} pp**. When signal and noise are that close,
+shrinking everything to zero is close to optimal, and even a *perfect but noisy*
+predictor can barely beat it. The human replication does not clearly beat it
+either — its {theirs['rmse']:.2f} pp sits above the baseline's {null_row['rmse']:.2f}, and its interval
+{_interval(theirs, 'rmse').strip()} contains it, so the two are indistinguishable. So "worse than
+predicting nothing" is not the damning line it looks like; it is a bar almost
+nobody clears in this study.
+
+What *is* damning is the size of the gap. Our {ours['rmse']:.2f} pp is roughly
+{ours['rmse'] / null_row['rmse']:.1f}× the baseline and {ours['rmse'] / theirs['rmse']:.1f}× the replication, with an interval
+{_interval(ours, 'rmse').strip()} that excludes both. That excess is not noise; it is the over-spread.
 
 That is not a small-sample artefact. Correcting the slope for sampling noise in
 the predictions barely moves it (β_adj = {ours['beta_adj']:.2f}, against the replication's

@@ -29,10 +29,24 @@ agreement is **61%** against the replication's
 
 **The magnitudes are not.** Our effects are **2.6 times too spread out**
 (SD 3.98 pp against the real 1.55 pp), and the calibration slope is
-**β = 0.16** — the human effect is about a sixth of what we predict. The
-consequence is blunt: our **RMSE of 3.62 pp is worse than simply predicting
-no effect at all** (1.54 pp), and far worse than a real replication's
-1.68 pp.
+**β = 0.16** — the human effect is about a sixth of what we predict. Our RMSE is
+**3.62 pp** [2.37, 4.65], against a real replication's 1.68 pp [1.22, 2.08]
+and 1.54 pp for predicting no effect at all.
+
+**Read the RMSE column carefully — the zero-predictor is a strong baseline here,
+not a weak one.** The true effects in these six arms are barely larger than the
+noise in a half sample of this size: true effect SD is **1.12 pp** against a
+per-effect standard error of **1.07 pp**. When signal and noise are that close,
+shrinking everything to zero is close to optimal, and even a *perfect but noisy*
+predictor can barely beat it. The human replication does not clearly beat it
+either — its 1.68 pp sits above the baseline's 1.54, and its interval
+[1.22, 2.08] contains it, so the two are indistinguishable. So "worse than
+predicting nothing" is not the damning line it looks like; it is a bar almost
+nobody clears in this study.
+
+What *is* damning is the size of the gap. Our 3.62 pp is roughly
+2.4× the baseline and 2.2× the replication, with an interval
+[2.37, 4.65] that excludes both. That excess is not noise; it is the over-spread.
 
 That is not a small-sample artefact. Correcting the slope for sampling noise in
 the predictions barely moves it (β_adj = 0.17, against the replication's
