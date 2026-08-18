@@ -266,25 +266,23 @@ def _scatter(pairs_by_run: dict, human_pairs, path: Path) -> None:
 def _delta_plot(
     verdict: pd.DataFrame, baseline: str, contender: str, path: Path
 ) -> None:
-    """Paired improvement per metric, with its 95% interval.
+    """Paired change per metric, with its 95% interval.
 
-    Signs are flipped for metrics where lower is better, so *positive is always
-    better* and the reader does not have to hold two conventions at once.  The raw
-    signed deltas stay in the table beside this figure.
+    **Plots the raw signed delta, the same number the table beside it prints.**
+    An earlier version flipped the sign of the lower-is-better metrics so that
+    "positive" would mean "better" on every row — and then still labelled each row
+    with the metric's own convention, so the RMSE panel read "+0.812" next to
+    "lower is better" while the table said -0.812. Two conventions in one panel,
+    and the figure disagreed with its own table.
+
+    So the sign stays raw and each row keeps its own convention in its label, which
+    is where the direction belonged all along.  Nothing to flip mentally, and the
+    numbers match the table.
     """
     viz.style()
     import matplotlib.pyplot as plt
 
     frame = verdict.copy()
-    direction = np.where(frame["higher_is_better"], 1.0, -1.0)
-    frame["improvement"] = frame["delta"] * direction
-    # Flipping the sign swaps which end of the interval is which.
-    frame["lo"] = np.minimum(
-        frame["delta_lo"] * direction, frame["delta_hi"] * direction
-    )
-    frame["hi"] = np.maximum(
-        frame["delta_lo"] * direction, frame["delta_hi"] * direction
-    )
 
     # Small multiples, one panel per metric.  These are measures of different
     # scale — directional agreement in percentage points, correlations in
@@ -292,17 +290,24 @@ def _delta_plot(
     # correlation deltas beside a swing of 11 points, and a second axis is never
     # the answer.  Each panel gets its own scale and the title says so.
     fig, axes = plt.subplots(
-        len(frame), 1, figsize=(6.8, 1.05 * len(frame) + 1.5), squeeze=False
+        len(frame), 1, figsize=(7.0, 1.05 * len(frame) + 1.7), squeeze=False
     )
     # Each panel carries its own tick labels below it, so the panels need real
     # separation or those labels land on the next panel's marks.
-    fig.subplots_adjust(hspace=1.15)
+    fig.subplots_adjust(hspace=1.25)
     for ax, row in zip(axes[:, 0], frame.itertuples()):
-        span = max(abs(row.lo), abs(row.hi), abs(row.improvement)) or 1.0
+        span = max(abs(row.delta_lo), abs(row.delta_hi), abs(row.delta)) or 1.0
+        limit = 1.45 * span
         ax.axvline(0, color=viz.TEXT_MUTED, lw=1.2)
-        ax.plot([row.lo, row.hi], [0, 0], color=viz.CATEGORICAL[0], lw=2.4, alpha=0.5)
+        ax.plot(
+            [row.delta_lo, row.delta_hi],
+            [0, 0],
+            color=viz.CATEGORICAL[0],
+            lw=2.4,
+            alpha=0.5,
+        )
         ax.scatter(
-            [row.improvement],
+            [row.delta],
             [0],
             s=58,
             color=viz.CATEGORICAL[0],
@@ -311,16 +316,16 @@ def _delta_plot(
             zorder=3,
         )
         ax.annotate(
-            f"{row.improvement:+.3f}",
-            (row.improvement, 0),
+            f"{row.delta:+.3f}",
+            (row.delta, 0),
             textcoords="offset points",
-            xytext=(0, 11),
+            xytext=(0, 12),
             ha="center",
             fontsize=9,
             color=viz.TEXT_SECONDARY,
         )
-        ax.set_xlim(-1.35 * span, 1.35 * span)
-        ax.set_ylim(-0.5, 0.9)
+        ax.set_xlim(-limit, limit)
+        ax.set_ylim(-0.5, 0.95)
         ax.set_yticks([])
         ax.tick_params(axis="x", labelsize=8)
         ax.set_ylabel(
@@ -334,8 +339,10 @@ def _delta_plot(
         for side in ("left", "right", "top"):
             ax.spines[side].set_visible(False)
     axes[0, 0].set_title(
-        f"Paired improvement of {contender} over {baseline}\n"
-        "95% cluster bootstrap · positive = more faithful · own scale per metric",
+        f"Paired change from {baseline} to {contender}\n"
+        "raw signed delta, as in the table — so on a lower-is-better row a "
+        "negative delta\nis the improvement · 95% cluster bootstrap · own scale "
+        "per metric",
         fontsize=10.5,
     )
     viz.save(fig, path)
@@ -459,7 +466,7 @@ def generate(
             verdict,
             model_label(baseline),
             model_label(contender),
-            plots / "05_paired_improvement.png",
+            plots / "05_paired_change.png",
         )
     if len(levels):
         _level_plot(levels, plots / "05_level_error.png")
@@ -603,7 +610,7 @@ def _write(
             "",
         ]
         lines += [_verdict_sentence(verdict, m, cont_name) for m in verdict["metric"]]
-        lines += ["", "![Paired improvement](plots/05_paired_improvement.png)", ""]
+        lines += ["", "![Paired change per metric](plots/05_paired_change.png)", ""]
     else:
         lines += ["Not enough shared intervention clusters to pair on.", ""]
 

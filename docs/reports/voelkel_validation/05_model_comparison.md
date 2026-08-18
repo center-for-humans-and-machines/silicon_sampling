@@ -43,7 +43,7 @@ Clusters resampled: 6.
 - **rmse**: -0.812 [-1.711, +0.220] — not settled: the resamples do not agree on a direction.
 - **beta**: -0.047 [-0.164, +0.096] — not settled: the resamples do not agree on a direction.
 
-![Paired improvement](plots/05_paired_improvement.png)
+![Paired change per metric](plots/05_paired_change.png)
 
 ![Both models against human effects](plots/05_models_vs_human.png)
 

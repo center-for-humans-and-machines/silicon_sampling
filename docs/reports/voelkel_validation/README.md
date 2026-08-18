@@ -34,7 +34,7 @@ prediction of which interventions work**.
 | --- | --- | --- | --- |
 | mean absolute level error | 22.9 pp | **8.0 pp** | large improvement |
 | effect over-spread vs truth | 2.6x | **1.7x** | improvement |
-| RMSE | 3.620 | **2.808** | -0.81 [-1.71, +0.22], p(better) 0.94 |
+| RMSE (lower better) | 3.620 | **2.808** | -0.81 [-1.71, +0.22], p(better) 0.94 |
 | pearson r | **0.408** | 0.190 | -0.22 [-0.43, +0.14], p(better) 0.10 |
 | directional % | **61.1** | 55.6 | -5.6 [-31.5, +22.2], p(better) 0.32 |
 | partisan gap, control arm | 3.9 pp (human 3.0) | 9.8 pp | flat -> stereotyped |
