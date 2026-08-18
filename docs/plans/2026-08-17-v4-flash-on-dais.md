@@ -32,12 +32,14 @@ but three things about this model change the run shape versus Qwen2.5-7B:
 
 1. **294.7 GB of weights need ≥ 4 H200 or ≥ 2 B200.** Two H200s (282 GB) cannot
    hold it.
-2. **KV per session collapses by 10×.** Only 2 of 43 layers keep a full-length
-   MLA cache; the rest are sliding-window compressor states of 8 or 128
-   positions (`CompressorStateCache.sliding_window = coff * compress_ratio`).
-   That is **2,304 B/token + 5.9 MB fixed**, so a 7,500-token transcript costs
-   **23 MB** against Qwen2.5-7B's 229 MB. The KV cache stops being the binding
-   constraint on group size, which is what the whole driver was built around.
+2. ~~**KV per session collapses by 10×.**~~ **This was wrong — see §4b.** The
+   reasoning was that only 2 of 43 layers keep a full-length MLA cache and the
+   rest are sliding-window compressor states, giving 2,304 B/token + 5.9 MB fixed
+   and so ~23 MB for a 7,500-token transcript. The engine reports otherwise:
+   4×H200 holds **27-50 transcripts**, not the ~500 that implies. The hybrid
+   compressor/MLA cache is far more expensive per session than the layer ratios
+   suggest, and **KV capacity remains the binding constraint on group size** —
+   exactly as it was for Qwen2.5-7B.
 3. **Tensor parallelism is mandatory**, and `configure_runtime()` currently
    forces `VLLM_ENABLE_V1_MULTIPROCESSING=0`, which is incompatible with TP > 1.
 
@@ -64,7 +66,14 @@ B200s**, and 97% of that is a CPU re-tokenising text the GPU already has cached.
 Fixing it (step 1 below) is what makes the hardware matter.
 
 GPU term alone, once the host term is out of the way — group size fixed at the
-weight-bound/compute-bound crossover, swept over achieved HBM bandwidth:
+weight-bound/compute-bound crossover, swept over achieved HBM bandwidth.
+
+> **Superseded: every row below assumes a group size of 512-1024, and the real
+> capacity is 27-50.** Multiply the Pfänder columns by roughly 12-19x, or read the
+> measured figures in §4b instead. The table is kept because the *shape* of the
+> reasoning held up — the run is weight-streaming-bound, step time is flat in
+> batch size, and ~40% of peak bandwidth was the right guess — but the one input
+> that was never engine-verified is the one that broke it.
 
 | config | group | ms/step | Pfänder @25% bw | @40% | @60% | Voelkel @40% |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -75,10 +84,10 @@ weight-bound/compute-bound crossover, swept over achieved HBM bandwidth:
 | 4×B200 | 1024 | 23.0 | 0.12 h | 0.07 h | 0.06 h | 0.02 h |
 | 8×B200 | 1024 | 11.5 | 0.06 h | 0.04 h | 0.03 h | 0.01 h |
 
-Both numbers are small enough that **the run is not the expensive part of this
-task** — even at 5× my estimate, Pfänder on 8×H200 is a one-hour job inside the
-24 h DAIS cap. That flips the plan's priorities: the engineering risk is in the
-driver and the analysis, not in GPU budget.
+That conclusion — "the run is not the expensive part of this task" — did not
+survive. With the real group size, Pfänder is 8-16 h of 4-GPU time spread over
+several resumed jobs, and queue waits add hours on top. The engineering risk was
+still mostly in the driver and the analysis, but GPU time was not free.
 
 ## Plan
 
@@ -184,6 +193,35 @@ respondents stratified across arms, at group size 64. Confirm and record:
 and report rather than burning 24 h of an 8-GPU node — that would mean the model
 is being served in a way the calculation does not describe, and the fix belongs
 upstream of a full run.
+
+### 4a. Wall-time is a scheduling cost, so ask for the estimate plus headroom
+
+A 24 h request queues behind everything shorter, and on DAIS the queue wait
+dominates. So the limit is set to the estimate plus ~60-100%, and being killed at
+the limit is treated as normal rather than as a failure: the sampler resumes from
+`answers.jsonl`, losing at most the group in flight (~100 respondents, a couple of
+minutes), plus one model load.
+
+**Resuming is resubmitting the identical job.** Nothing needs editing — the
+wrapper reads how many respondents are already done and asks only for the rest.
+The two submissions, verbatim, are in
+[`scripts/dais_submit_v4_flash.md`](../../scripts/dais_submit_v4_flash.md).
+
+### 4b. What the measurements said, against the estimate
+
+| | plan estimate | measured |
+| --- | --- | --- |
+| KV capacity, 4xH200 | group 512 | **group 27-50** (203k-228k tokens) |
+| Voelkel, 6,203 | 1.5-3 h | **~2.6 h** |
+| Pfänder, 18,000 | 5-9 h | ~8-16 h (group ~31) |
+| decode throughput | — | **2,400 respondents/h** at group 50 |
+
+The group-size prediction was the plan's one real error, and it was worth ~19x.
+Reading `compress_ratios` and concluding that only 2 of 43 layers keep a
+full-length cache gave ~23 MB per session; the hybrid compressor/MLA cache
+actually costs enough that 4xH200 holds 27-50 transcripts, not 512. Since
+throughput is linear in group size, that single number carried the whole
+headline. Everything downstream of an engine-reported KV figure was fine.
 
 ### 5. Full runs, then pull down
 
