@@ -11,7 +11,7 @@ import pandas as pd
 from ..analysis import plotting as viz
 from ..benchmark.reference import ate_pairs, half_split
 from . import score as S
-from .paths import PLOTS, REPORT, SAMPLES
+from .paths import REPORT, SAMPLES
 
 
 def md_table(frame: pd.DataFrame, floats: int = 3) -> str:
@@ -49,7 +49,11 @@ def generate(
     different question with a different shape — see :mod:`.compare`.
     """
     out.mkdir(parents=True, exist_ok=True)
-    PLOTS.mkdir(parents=True, exist_ok=True)
+    # Plots belong beside the report they illustrate.  Deriving them from ``out``
+    # rather than a module constant is what keeps a run written elsewhere — a dry
+    # run, a second model — from overwriting the committed report's figures.
+    plots = out / "plots"
+    plots.mkdir(parents=True, exist_ok=True)
     run_dir = run_dir or SAMPLES
     label = label or "Silicon sample (Qwen2.5-7B)"
 
@@ -68,7 +72,7 @@ def generate(
     baselines = S.baseline_means(human1, synthetic)
     gaps = S.parity_gap(baselines)
 
-    _plots(pairs, human_pairs, reference, prediction, shapes, human1, synthetic)
+    _plots(pairs, human_pairs, reference, prediction, shapes, human1, synthetic, plots)
     _write_reports(
         out,
         board,
@@ -95,7 +99,7 @@ def generate(
 
 
 def _plots(
-    pairs, human_pairs, reference, prediction, shapes, human1, synthetic
+    pairs, human_pairs, reference, prediction, shapes, human1, synthetic, plots
 ) -> None:
     viz.style()
     import matplotlib.pyplot as plt
@@ -186,7 +190,7 @@ def _plots(
     handles.append(Line2D([], [], color=viz.TEXT_MUTED, lw=1.6, ls=(0, (5, 3))))
     labels.append("same slope, predictor noise removed")
     ax.legend(handles, labels, loc="upper left", fontsize=8.5)
-    viz.save(fig, PLOTS / "01_predicted_vs_human.png")
+    viz.save(fig, plots / "01_predicted_vs_human.png")
 
     # Effects arm by arm, ours against theirs, for the composite outcome.
     composite = pairs[pairs["outcome"] == "Composite"].sort_values("estimate_h")
@@ -228,7 +232,7 @@ def _plots(
         ax.set_title("Composite outcome: human effects and ours")
         ax.grid(axis="y", visible=False)
         ax.legend(loc="best")
-        viz.save(fig, PLOTS / "02_composite_effects.png")
+        viz.save(fig, plots / "02_composite_effects.png")
 
     # Distribution shape: variance ratio per cell.
     if len(shapes):
@@ -241,7 +245,7 @@ def _plots(
             pivot.columns.tolist(),
             title="Variance ratio, synthetic over human (1 = perfect)",
             cbar_label="ratio",
-            path=PLOTS / "03_variance_ratio.png",
+            path=plots / "03_variance_ratio.png",
             diverging=False,
             fmt="{:.2f}",
             figsize=(8.6, 4.4),
@@ -282,7 +286,7 @@ def _plots(
         color=viz.TEXT_PRIMARY,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.94))
-    viz.save(fig, PLOTS / "04_control_distributions.png")
+    viz.save(fig, plots / "04_control_distributions.png")
 
 
 def _write_reports(

@@ -24,7 +24,7 @@ from ..analysis import plotting as viz
 from ..benchmark.reference import ate_pairs, half_split
 from ..models import label as model_label
 from . import score as S
-from .paths import PLOTS, REPORT, samples_dir
+from .paths import REPORT, samples_dir
 
 #: One colour per submission, held stable across every figure so a reader can
 #: carry identity between them.  Validated as a categorical trio on the light
@@ -362,7 +362,8 @@ def generate(
 ) -> dict:
     """Write ``05_model_comparison.md`` and its figures."""
     out.mkdir(parents=True, exist_ok=True)
-    PLOTS.mkdir(parents=True, exist_ok=True)
+    plots = out / "plots"
+    plots.mkdir(parents=True, exist_ok=True)
 
     samples = load_runs(runs)
     humans = S.load_humans()
@@ -387,16 +388,16 @@ def generate(
         run: ate_pairs(reference, S.effects(sample)) for run, sample in samples.items()
     }
     human_pairs = ate_pairs(reference, S.effects(human2))
-    _scatter(pairs_by_run, human_pairs, PLOTS / "05_models_vs_human.png")
+    _scatter(pairs_by_run, human_pairs, plots / "05_models_vs_human.png")
     if len(verdict):
         _delta_plot(
             verdict,
             model_label(baseline),
             model_label(contender),
-            PLOTS / "05_paired_improvement.png",
+            plots / "05_paired_improvement.png",
         )
     if len(levels):
-        _level_plot(levels, PLOTS / "05_level_error.png")
+        _level_plot(levels, plots / "05_level_error.png")
 
     _write(out, board, verdict, levels, subgroups, diag, samples, baseline, contender)
     return {

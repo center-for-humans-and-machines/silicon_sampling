@@ -34,7 +34,7 @@ from ..analysis import moderators as mod
 from ..analysis import plotting as viz
 from ..models import label as model_label
 from . import outcomes as oc
-from .paths import PLOTS, REPORT, samples_dir
+from .paths import REPORT, samples_dir
 
 MODERATORS = tuple(oc.MODERATORS)
 PRIMARY = "trust_multidimensional"
@@ -287,7 +287,8 @@ def generate(
     from .report import BATTERIES
 
     out.mkdir(parents=True, exist_ok=True)
-    PLOTS.mkdir(parents=True, exist_ok=True)
+    plots = out / "plots"
+    plots.mkdir(parents=True, exist_ok=True)
 
     samples = load_runs(runs)
     tables = effect_tables(samples)
@@ -297,7 +298,7 @@ def generate(
     likeness = survey_likeness(samples, BATTERIES)
     diag = diagnostics(runs)
 
-    _effect_scatter(tables, baseline, contender, PLOTS / "05_effect_agreement.png")
+    _effect_scatter(tables, baseline, contender, plots / "05_effect_agreement.png")
 
     base_name, cont_name = model_label(baseline), model_label(contender)
     primary_row = agreement[agreement["outcome"] == PRIMARY]

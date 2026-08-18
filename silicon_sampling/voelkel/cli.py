@@ -82,10 +82,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     score_cmd.add_argument("--out", default=None)
     score_cmd.add_argument(
-        "--runs",
-        nargs="+",
-        default=[DEFAULT_RUN],
-        help="run keys to score; more than one puts both models on the board",
+        "--run",
+        default=DEFAULT_RUN,
+        help="which model's run to score on its own; use `compare` for two",
     )
 
     cmp_cmd = sub.add_parser(
@@ -187,9 +186,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "score":
+        from ..models import label as model_label
         from .report import generate
 
-        result = generate(out=Path(args.out) if args.out else paths.REPORT)
+        run_dir = paths.samples_dir(args.run)
+        result = generate(
+            out=Path(args.out) if args.out else paths.REPORT,
+            run_dir=run_dir,
+            label=f"Silicon sample ({model_label(args.run)})",
+        )
         print(result["board"].to_string(index=False))
         return 0
 
