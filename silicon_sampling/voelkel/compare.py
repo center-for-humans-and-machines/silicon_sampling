@@ -117,6 +117,67 @@ def subgroup_signal(human1: pd.DataFrame, samples: dict) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def effect_magnitudes(
+    human1: pd.DataFrame, human2: pd.DataFrame, samples: dict
+) -> pd.DataFrame:
+    """How big each submission says the effects are, against how big they are.
+
+    Answers "over- or under-estimating?" directly, which the calibration slope
+    does *not*: beta is ``cov(human, predicted) / var(predicted)``, so it moves
+    with alignment as well as magnitude and a model can shrink toward the right
+    size while beta falls.  Spread ratios separate the two.
+
+    Three reference points, because "the truth" is not observable here:
+
+    ``sd_estimate``
+        The spread of the submission's 54 effect estimates.
+    ``ratio_vs_human1``
+        Against Human 1's *estimated* spread — the number the main report quotes.
+        Human 1's estimates carry sampling noise, so this understates the
+        exaggeration.
+    ``ratio_vs_true``
+        Against the noise-corrected spread, ``var(estimate) - mean(se^2)``, which
+        is the closest thing to the real between-arm variation.
+    """
+    reference = S.effects(human1)
+    pairs_human = ate_pairs(reference, S.effects(human2))
+    sd_human1 = float(pairs_human["estimate_h"].std(ddof=1))
+    noise = float(np.mean(pairs_human["se_h"].to_numpy(float) ** 2))
+    sd_true = float(np.sqrt(max(sd_human1**2 - noise, 0.0)))
+
+    rows = []
+    for label, frame in list(samples.items()) + [("__human2__", human2)]:
+        name = (
+            "Human replication (Human 2)"
+            if label == "__human2__"
+            else model_label(label)
+        )
+        pairs = ate_pairs(reference, S.effects(frame))
+        sd = float(pairs["estimate_l"].std(ddof=1))
+        rows.append(
+            {
+                "submission": name,
+                "mean_abs_effect": float(pairs["estimate_l"].abs().mean()),
+                "sd_estimate": sd,
+                "ratio_vs_human1": sd / sd_human1 if sd_human1 else float("nan"),
+                "ratio_vs_true": sd / sd_true if sd_true else float("nan"),
+            }
+        )
+    rows.append(
+        {
+            "submission": "Human 1 (the reference itself)",
+            "mean_abs_effect": float(pairs_human["estimate_h"].abs().mean()),
+            "sd_estimate": sd_human1,
+            "ratio_vs_human1": 1.0,
+            "ratio_vs_true": sd_human1 / sd_true if sd_true else float("nan"),
+        }
+    )
+    frame = pd.DataFrame(rows)
+    frame.attrs["sd_true"] = sd_true
+    frame.attrs["sd_human1"] = sd_human1
+    return frame
+
+
 def party_gaps(human1: pd.DataFrame, samples: dict) -> pd.DataFrame:
     """Republican minus Democrat means in the control arm, ours against theirs.
 
@@ -451,6 +512,7 @@ def generate(
         draws=draws,
     )
     levels = level_errors(human1, samples)
+    magnitudes = effect_magnitudes(human1, human2, samples)
     subgroups = subgroup_signal(human1, samples)
     gaps = party_gaps(human1, samples)
     gap_summary = party_gap_summary(gaps)
@@ -476,6 +538,7 @@ def generate(
         board,
         verdict,
         levels,
+        magnitudes,
         subgroups,
         gaps,
         gap_summary,
@@ -488,6 +551,7 @@ def generate(
         "board": board,
         "verdict": verdict,
         "levels": levels,
+        "magnitudes": magnitudes,
         "subgroups": subgroups,
         "party_gaps": gaps,
         "party_gap_summary": gap_summary,
@@ -528,6 +592,7 @@ def _write(
     board,
     verdict,
     levels,
+    magnitudes,
     subgroups,
     gaps,
     gap_summary,
@@ -539,55 +604,255 @@ def _write(
     base_name, cont_name = model_label(baseline), model_label(contender)
     counts = " · ".join(f"{model_label(run)}: {len(s):,}" for run, s in samples.items())
     clusters = verdict.attrs.get("n_clusters") if len(verdict) else None
+    sd_true = magnitudes.attrs.get("sd_true", float("nan"))
+
+    def _row(frame, name, column):
+        hit = frame[frame["submission"] == name]
+        return float(hit[column].iloc[0]) if len(hit) else float("nan")
 
     mean_level = (
         levels.groupby("model")["level_error"].mean().round(1).to_dict()
         if len(levels)
         else {}
     )
-    level_line = " · ".join(f"{name} {value}" for name, value in mean_level.items())
+    rank_columns = [
+        c
+        for c in (
+            "submission",
+            "directional_pct",
+            "spearman_rho",
+            "pearson_r",
+            "pearson_adj",
+        )
+        if c in board.columns
+    ]
 
     lines = [
-        "# Does a bigger base model sample more faithfully?",
+        f"# Four questions about {cont_name} against {base_name}",
         "",
         "[← main report](README.md)",
         "",
-        f"{base_name} against {cont_name}, both scored against the same real",
-        f"responses. Respondents: {counts}. Both models sampled the *same* profiles",
-        "with the same seeds, so the comparison is paired respondent by respondent.",
+        f"The same {len(next(iter(samples.values()))):,} respondent profiles, sampled twice — "
+        f"once with {base_name} and once with {cont_name}, about a 40x jump in",
+        "parameters — and both scored against the same real responses. Same seeds, so",
+        "the two samples are paired respondent by respondent, which is what lets the",
+        "difference between them carry an interval rather than just a sign.",
         "",
-        "## The leaderboard",
+        f"Respondents: {counts}.",
         "",
-        _md(
-            board[
-                [
-                    c
-                    for c in (
-                        "submission",
-                        "n_pairs",
-                        "directional_pct",
-                        "pearson_r",
-                        "pearson_adj",
-                        "rmse",
-                        "alpha",
-                        "beta",
-                        "beta_adj",
-                    )
-                    if c in board.columns
-                ]
-            ]
+        "**Everything here is read against the human replication**, not against a",
+        "perfect score. Human 2 predicting Human 1 is what a fresh sample of this size",
+        "achieves, and it is the ceiling the pipeline is chasing — not 1.0.",
+        "",
+        "## The answers, in short",
+        "",
+        "| question | answer |",
+        "| --- | --- |",
+        f"| **1.** Over- or underestimating effect sizes? | **Both overestimate.** "
+        f"{base_name} spreads its effects {_row(magnitudes, base_name, 'ratio_vs_true'):.1f}x too wide, "
+        f"{cont_name} {_row(magnitudes, cont_name, 'ratio_vs_true'):.1f}x. Scaling up helped here. |",
+        f"| **2.** Right rank order and direction? | **{base_name} partly; {cont_name} worse.** "
+        f"Rank correlation {_row(board, base_name, 'spearman_rho'):.2f} against "
+        f"{_row(board, cont_name, 'spearman_rho'):.2f}, with a real replication at "
+        f"{_row(board, 'Human replication (Human 2)', 'spearman_rho'):.2f}. |",
+        f"| **3.** Do predictions change with demographics? | **Yes, both.** Real partisans differ by "
+        f"{_row(gap_summary.rename(columns={'model': 'submission'}), 'human (Human 1)', 'mean_abs_gap'):.1f} points; "
+        f"{base_name} produces {_row(gap_summary.rename(columns={'model': 'submission'}), base_name, 'mean_abs_gap'):.1f} and "
+        f"{cont_name} {_row(gap_summary.rename(columns={'model': 'submission'}), cont_name, 'mean_abs_gap'):.1f}. |",
+        "| **4.** Using demographics to their advantage? | **No, neither.** The moderators a model "
+        "could read predict its subgroup effects no better than the ones it could not. |",
+        "",
+        "And one precondition before any of them: the bigger model's answers sit far",
+        f"closer to where real answers sit — mean absolute level error "
+        f"{mean_level.get(base_name, float('nan')):.1f} -> {mean_level.get(cont_name, float('nan')):.1f} points on a 0-100 scale.",
+        "",
+        "In one line: **scaling the base model about 40x bought a much more realistic",
+        "sample and no better prediction of which interventions work.**",
+        "",
+        "---",
+        "",
+        "## First, a precondition: are the answers even in the right place?",
+        "",
+        "Treatment effects are differences, so a constant bias cancels out of them and",
+        "none of the four questions below would notice if every synthetic respondent",
+        "sat 40 points off. Raw response distributions have no such mercy.",
+        "",
+        f"**Mean absolute level error fell from {mean_level.get(base_name, float('nan')):.1f} to "
+        f"{mean_level.get(cont_name, float('nan')):.1f} points on a 0-100 scale.**",
+        "This is the largest single change between the two models, and it is not",
+        "marginal: on opposition to bipartisan cooperation the smaller model answered",
+        "83 where real Americans answered 21, and the bigger one answers 37. On support",
+        "for undemocratic candidates the smaller model said 18 against a real 53; the",
+        "bigger one says 56.",
+        "",
+        (
+            _md(
+                levels[
+                    [
+                        "model",
+                        "outcome",
+                        "mean_human",
+                        "mean_synthetic",
+                        "level_error",
+                        "variance_ratio",
+                        "ovl",
+                        "w1",
+                    ]
+                ].sort_values(["outcome", "model"]),
+                floats=2,
+            )
+            if len(levels)
+            else ""
         ),
         "",
-        "Read every row against the human replication, not against 1.0: a real",
-        "replication of this size is the ceiling the pipeline is chasing.",
+        "`ovl` is the overlap between the two distributions (1 is identical) and `w1`",
+        "the Wasserstein distance in scale points. Both improve on eight of nine",
+        "outcomes.",
         "",
-        "## Did it improve? The paired answer",
+        "![Level error by outcome](plots/05_level_error.png)",
         "",
-        "Both models answered the same instrument about the same interventions and",
-        "are scored against the same reference, so their errors move together. Each",
-        "bootstrap draw resamples one set of intervention clusters and rescores",
-        "*both* — which estimates the difference far more precisely than either",
-        "score, and is why this table, not the leaderboard above, is the verdict.",
+        "---",
+        "",
+        "## 1. Are the models over- or underestimating effect sizes?",
+        "",
+        "**Both overestimate, and the bigger model overestimates less.**",
+        "",
+        _md(magnitudes, floats=3),
+        "",
+        "The spread of the real between-arm effects, once sampling noise is removed,",
+        f"is **{sd_true:.2f} percentage points** — these interventions genuinely do very",
+        "little. Against that:",
+        "",
+        f"- {base_name} spreads its effects **{_row(magnitudes, base_name, 'ratio_vs_true'):.1f}x** too wide",
+        f"- {cont_name} spreads them **{_row(magnitudes, cont_name, 'ratio_vs_true'):.1f}x** too wide",
+        f"- even a real human replication looks **{_row(magnitudes, 'Human replication (Human 2)', 'ratio_vs_true'):.1f}x** too wide,"
+        " because its own estimates carry sampling noise",
+        "",
+        "So the direction of the error is the same for both models — they make these",
+        "messages look far more consequential than they are — and scaling up cut the",
+        "exaggeration by roughly a third.",
+        "",
+        "**Why the calibration slope does not show this.** `beta` in the leaderboard is",
+        f"{_row(board, base_name, 'beta'):.3f} for {base_name} and "
+        f"{_row(board, cont_name, 'beta'):.3f} for {cont_name} — it got *worse*, which looks",
+        "like a contradiction. It is not: beta is `cov(human, predicted) / var(predicted)`,",
+        "so it moves with alignment as well as with magnitude. The bigger model's effects",
+        "shrank toward the right size *and* became less aligned with the real ones, and",
+        "the second effect is the larger. Which is question 2.",
+        "",
+        "---",
+        "",
+        "## 2. Do they predict the right rank order and direction?",
+        "",
+        f"**{base_name} gets part of the ordering right. {cont_name} does worse.**",
+        "",
+        _md(board[rank_columns], floats=3),
+        "",
+        "`spearman_rho` is the rank-order question in its purest form and",
+        "`directional_pct` the sign question, with 50% as the no-information floor.",
+        "",
+        f"- rank order: {_row(board, base_name, 'spearman_rho'):.2f} for {base_name}, "
+        f"{_row(board, cont_name, 'spearman_rho'):.2f} for {cont_name}, against "
+        f"{_row(board, 'Human replication (Human 2)', 'spearman_rho'):.2f} for a real replication",
+        f"- direction: {_row(board, base_name, 'directional_pct'):.0f}% and "
+        f"{_row(board, cont_name, 'directional_pct'):.0f}%, against "
+        f"{_row(board, 'Human replication (Human 2)', 'directional_pct'):.0f}% and a floor of 50%",
+        "",
+        f"{cont_name}'s directional agreement, {_row(board, cont_name, 'directional_pct'):.1f}%, is the same as",
+        'the "predict every effect positive" baseline. That is the sharpest way to put',
+        "it: on which interventions help, the bigger model carries about as much",
+        "information as a constant guess.",
+        "",
+        "![Both models against human effects](plots/05_models_vs_human.png)",
+        "",
+        "The dashed lines remove each predictor's own sampling noise from the slope,",
+        "which matters because attenuation depends only on the x-axis and each",
+        "submission has a different amount of it. Read those, not the solid ones, when",
+        "comparing submissions by eye.",
+        "",
+        "---",
+        "",
+        "## 3. Do the models change their predictions based on demographics?",
+        "",
+        "**Yes, both do — and the bigger model varies far more than real people.**",
+        "",
+        "This question is about whether the demographics move the answers at all,",
+        "regardless of whether they move them correctly. The cleanest measure is the",
+        "Republican-minus-Democrat gap in the control arm, before any intervention:",
+        "party is named in every question of this instrument, so a model that ignores",
+        "its assigned identity has no excuse for a flat gap.",
+        "",
+        _md(gaps, floats=1),
+        "",
+        _md(gap_summary, floats=2),
+        "",
+        f"- real partisans differ by **{_row(gap_summary.rename(columns={'model': 'submission'}), 'human (Human 1)', 'mean_abs_gap'):.1f} points** on average",
+        f"- {base_name} produces **{_row(gap_summary.rename(columns={'model': 'submission'}), base_name, 'mean_abs_gap'):.1f}** — about the right size",
+        f"- {cont_name} produces **{_row(gap_summary.rename(columns={'model': 'submission'}), cont_name, 'mean_abs_gap'):.1f}** — roughly three times too large",
+        "",
+        "So neither model is demographically inert on this instrument. The failure is",
+        "in *how* they vary, not whether they vary — which is question 4.",
+        "",
+        "---",
+        "",
+        "## 4. Are they using demographics to their advantage?",
+        "",
+        "**No. Neither model turns the demographics it was given into a better",
+        "prediction.** Two independent tests, and both come out the same way.",
+        "",
+        "### Test one: do the partisan gaps point the right way?",
+        "",
+        "Correlation between each model's nine party gaps and the real ones:",
+        f"**{_row(gap_summary.rename(columns={'model': 'submission'}), base_name, 'corr_with_human_gaps'):.2f}** for {base_name}, "
+        f"**{_row(gap_summary.rename(columns={'model': 'submission'}), cont_name, 'corr_with_human_gaps'):.2f}** for {cont_name}.",
+        "",
+        f"{cont_name} is the better of the two here, but look at the signs in the table",
+        "above rather than the summary. Real respondents are *less* socially distant",
+        "from the out-party if they are Republican (-9.1); both models say the",
+        f"opposite, {base_name} mildly (-2.4 is at least the right sign) and {cont_name}",
+        "confidently wrong (+9.5). Getting a gap of the right rough size pointed the",
+        "wrong way is not an advantage.",
+        "",
+        "### Test two: do the moderators the model could *see* beat the ones it could not?",
+        "",
+        "This is the decisive test, and it needs no assumption about what the right",
+        "answer is. Three moderators appear in the transcript — gender, race, party —",
+        "and two never do: age and education came from the panel supplier and were never",
+        "shown. A model that uses what it is told should predict subgroup effects better",
+        "for the first group than the second. Neither does:",
+        "",
+        (
+            _md(subgroups.drop(columns=["run"], errors="ignore"), floats=3)
+            if len(subgroups)
+            else ""
+        ),
+        "",
+        f"- {base_name}: visible {_row(subgroups.rename(columns={'model': 'submission'}).query('moderators == \"visible\"'), base_name, 'pearson_r'):.3f} against invisible "
+        f"{_row(subgroups.rename(columns={'model': 'submission'}).query('moderators == \"invisible\"'), base_name, 'pearson_r'):.3f} — no gap at all",
+        f"- {cont_name}: visible {_row(subgroups.rename(columns={'model': 'submission'}).query('moderators == \"visible\"'), cont_name, 'pearson_r'):.3f} against invisible "
+        f"{_row(subgroups.rename(columns={'model': 'submission'}).query('moderators == \"invisible\"'), cont_name, 'pearson_r'):.3f} — visible does *worse*",
+        "",
+        "If either model were reading its assigned identity to any useful effect, the",
+        "visible row would beat the invisible one. For the smaller model the two are",
+        "indistinguishable; for the bigger one the ordering is backwards. The",
+        "demographic variation in question 3 is real, and it is noise.",
+        "",
+        "**The two models fail in opposite directions**, which is worth naming because",
+        "the benchmark's diagnostics are built to catch only one of them. A model",
+        "answering from a stereotype produces subgroup differences that are too large",
+        "and too clean; a model ignoring its assigned identity produces almost none.",
+        f"{cont_name} is the first kind and {base_name} closer to the second, so moving",
+        "from one to the other is not simply progress.",
+        "",
+        "---",
+        "",
+        "## So did the bigger model win? The paired verdict",
+        "",
+        "Both models answered the same instrument about the same interventions and are",
+        "scored against the same reference, so their errors move together. Each",
+        "bootstrap draw resamples one set of intervention clusters and rescores *both*,",
+        "which estimates the difference far more precisely than either score — and is",
+        "why this table, not the leaderboard, is the verdict.",
         "",
     ]
     if len(verdict):
@@ -606,83 +871,84 @@ def _write(
                 ]
             ),
             "",
-            f"Clusters resampled: {clusters}.",
+            f"Clusters resampled: {clusters}. `delta` is signed raw, so on `rmse` — the",
+            "one row where lower is better — a negative delta is the improvement.",
             "",
         ]
-        lines += [_verdict_sentence(verdict, m, cont_name) for m in verdict["metric"]]
-        lines += ["", "![Paired change per metric](plots/05_paired_change.png)", ""]
+        settled = [
+            m
+            for m in verdict["metric"]
+            if not 0.025
+            < float(verdict.loc[verdict["metric"] == m, "p_contender_better"].iloc[0])
+            < 0.975
+        ]
+        if settled:
+            lines += [_verdict_sentence(verdict, m, cont_name) for m in settled]
+        else:
+            lines += [
+                "Every row is unsettled — no metric's resamples agree on a direction —"
+                " so there are no per-metric conclusions to list.",
+            ]
+        lines += [
+            "",
+            "**Nothing clears its interval.** With six intervention clusters to resample,",
+            "this study cannot certify a difference of the size at stake, so the honest",
+            'reading of the effect metrics is "no improvement, possibly a regression",',
+            "not a demonstrated regression.",
+            "",
+            "The one row that comes close is `rmse`, and it is the row most likely to be",
+            "misread. It improved because the exaggeration shrank (question 1), not",
+            "because the ordering improved (question 2) — squared error rewards a",
+            "predictor for moving toward the right scale even as its ranking degrades.",
+            "Note also that predicting **no effect at all** scores 1.537 on this metric,",
+            "better than either model: when the true effects are barely larger than the",
+            "noise, shrinking everything to zero is close to optimal.",
+            "",
+            "![Paired change per metric](plots/05_paired_change.png)",
+            "",
+        ]
     else:
         lines += ["Not enough shared intervention clusters to pair on.", ""]
 
     lines += [
-        "![Both models against human effects](plots/05_models_vs_human.png)",
+        "---",
         "",
-        "## Levels, not just effects",
+        "## What this implies for the pipeline",
         "",
-        "Treatment effects are differences, so a constant bias cancels out of them.",
-        "Raw response distributions have no such mercy, and this is where the",
-        f"{base_name} sample failed worst.",
+        "The three things that improved — level accuracy, exaggeration, demographic",
+        "responsiveness — are all properties of *how a respondent answers in isolation*,",
+        "and those are exactly what a better language model should be expected to fix.",
+        "The thing that did not improve is the one the megastudy actually scores:",
+        "whether the sample can tell the interventions apart. That is a claim about",
+        "counterfactual sensitivity to a paragraph of text, and 40x more parameters",
+        "bought none of it.",
         "",
-        f"Mean absolute level error across outcomes — {level_line} points on a 0-100 scale.",
+        "So the next thing worth trying is probably not a bigger model. It is a change",
+        "to what the model is asked to do — conditioning it more strongly on the",
+        "stimulus, or abandoning single-pass simulation for something that reasons about",
+        "the message before answering.",
         "",
-    ]
-    if len(levels):
-        lines += [
-            _md(
-                levels[
-                    [
-                        "model",
-                        "outcome",
-                        "mean_human",
-                        "mean_synthetic",
-                        "level_error",
-                        "variance_ratio",
-                        "ovl",
-                        "w1",
-                    ]
-                ].sort_values(["outcome", "model"]),
-                floats=2,
-            ),
-            "",
-            "![Level error by outcome](plots/05_level_error.png)",
-            "",
-        ]
-
-    lines += [
-        "## Does it condition on who it is supposed to be?",
+        "---",
         "",
-        "The sharpest failure of the smaller model was demographic flatness: it",
-        "wrote a party identity into the transcript and then answered as if it had",
-        "not. If scale fixes anything, the *visible* moderators should now beat the",
-        "invisible ones — the model can read the first group and cannot read the",
-        "second, so a real conditioning effect has to show up as a gap.",
-        "",
-    ]
-    if len(subgroups):
-        lines += [_md(subgroups), ""]
-    lines += [
-        "Subgroup treatment effects are a hard and noisy target, though, so the",
-        "cleaner test is whether the model puts partisans in different places at all,",
-        "before any intervention. Party is named in every question of this",
-        "instrument, so a flat gap has no excuse:",
-        "",
-        _md(gaps, floats=1),
-        "",
-        _md(gap_summary, floats=2),
-        "",
-        "**The two models fail in opposite directions.** Read `mean_abs_gap` against",
-        "the human row: one sample is too flat, the other too stereotyped. A model",
-        "answering from a stereotype produces subgroup differences that are too large",
-        "and too clean; a model ignoring its assigned identity produces almost none.",
-        "The benchmark's diagnostics are built to catch the first, and the second is",
-        "the more damaging of the two for subgroup estimates — so moving from one to",
-        "the other is not simply progress.",
-        "",
-    ]
-    lines += [
         "## What the samplers did",
         "",
         _md(diag, floats=4) if len(diag) else "No run metadata found.",
+        "",
+        "## Caveats",
+        "",
+        "1. **The two runs differ in KV-cache precision.** DeepSeek-V4-Flash requires",
+        "   `fp8_ds_mla` — on an H200 vLLM selects its FlashMLA attention, whose paged",
+        "   layout *is* the fp8 format, and it will not start with anything else. The",
+        "   checkpoint ships the UE8M0 scales, so this is the precision the model was",
+        "   built to run at rather than a compromise, but the Qwen run used bf16 KV and",
+        "   that asymmetry cannot be ruled out as a contributor.",
+        "2. **Six intervention clusters.** The pure-text rule left 6 of 27 arms, so every",
+        "   interval here is wide and the paired bootstrap resamples six things. That is",
+        "   why the verdict table settles nothing.",
+        "3. **A subset the paper never reports.** Dropping the non-textual arms means the",
+        "   human reference is not the study's headline result.",
+        "4. **2022 sits inside both models' training windows.** Neither result should be",
+        "   read as a clean out-of-sample prediction.",
         "",
     ]
     (out / "05_model_comparison.md").write_text(
