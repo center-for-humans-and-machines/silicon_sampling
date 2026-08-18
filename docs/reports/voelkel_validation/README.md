@@ -6,20 +6,48 @@ the same shape and publishes **35,252 participant-level responses**. Running the
 identical pipeline over it and scoring it with the benchmark's own metrics is the
 closest available estimate of how the approach actually performs.
 
-**6,203 synthetic respondents** across 7 arms,
-scored against **Human 1** (6,259 real respondents), with **Human 2**
-(6,242) predicting Human 1 as the yardstick.
+**6,203 synthetic respondents** across 7 arms, sampled twice — once with
+Qwen2.5-7B and once with **DeepSeek-V4-Flash-Base (~290 B)** — and scored against
+**Human 1** (6,259 real respondents), with **Human 2** (6,242) predicting Human 1
+as the yardstick. Both models answered the same profiles with the same seeds, so
+the two samples are paired respondent by respondent.
 
 ## The result
 
 | submission | n_pairs | directional_pct | pearson_r | pearson_adj | rmse | alpha | beta |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Silicon sample (Qwen2.5-7B) | 54 | 61.111 | 0.408 | 0.563 | 3.620 | 0.014 | 0.159 |
+| Silicon sample (DeepSeek-V4-Flash) | 54 | 55.556 | 0.190 | 0.262 | 2.808 | 0.002 | 0.112 |
 | Human replication (Human 2) | 54 | 66.667 | 0.514 | 0.709 | 1.682 | 0.068 | 0.436 |
 | Baseline: no effect | 54 | 50.000 |  |  | 1.537 | -0.059 | 0.000 |
 | Baseline: all positive | 54 | 55.556 |  |  | 1.865 | -0.029 | -0.029 |
 
 Read every number against the human replication row, not against 1.0.
+
+### The 40x bigger model did not recover effects better
+
+**[Full paired comparison →](05_model_comparison.md)**. In one line: scaling from
+7 B to ~290 B parameters bought a **much more realistic sample** and **no better
+prediction of which interventions work**.
+
+| | Qwen2.5-7B | DeepSeek-V4-Flash | paired verdict |
+| --- | --- | --- | --- |
+| mean absolute level error | 22.9 pp | **8.0 pp** | large improvement |
+| effect over-spread vs truth | 2.6x | **1.7x** | improvement |
+| RMSE | 3.620 | **2.808** | -0.81 [-1.71, +0.22], p(better) 0.94 |
+| pearson r | **0.408** | 0.190 | -0.22 [-0.43, +0.14], p(better) 0.10 |
+| directional % | **61.1** | 55.6 | -5.6 [-31.5, +22.2], p(better) 0.32 |
+| partisan gap, control arm | 3.9 pp (human 3.0) | 9.8 pp | flat -> stereotyped |
+
+None of the effect-recovery deltas clears its interval, so the correct reading is
+"no improvement, and possibly a regression" rather than a demonstrated regression.
+What *is* clear is the direction of travel on levels: the bigger model puts
+respondents in roughly the right place on scales where the smaller one was 20-60
+points out, and it stopped being demographically flat — overshooting instead.
+
+The improved RMSE is mostly the reduced exaggeration, not better ranking: a
+predictor whose effects shrink toward the truth's scale gains on squared error
+even when its ordering gets worse, and here the ordering did get worse.
 
 **The ordering is partly right.** A real replication of this size scores
 **r = 0.51**; our sample scores **r = 0.41** [0.11, 0.55] —
@@ -137,6 +165,8 @@ other by roughly the right amount, about the wrong thing.
   question — this instrument asks about "Republicans" and "Democrats" by name —
   the model is not conditioning on who it is supposed to be.
 - **[Diagnostics](04_diagnostics.md)** — what the sampler did.
+- **[Model comparison](05_model_comparison.md)** — Qwen2.5-7B against
+  DeepSeek-V4-Flash-Base, cluster-paired so the difference carries an interval.
 
 ## What this can and cannot tell us about Pfänder
 

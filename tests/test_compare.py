@@ -89,6 +89,61 @@ def test_partisan_gap_skips_a_sample_without_the_columns():
     assert len(pfc.partisan_gap({"qwen25_7b": pd.DataFrame({"x": [1, 2]})})) == 0
 
 
+def _control_arm(gaps: dict, n: int = 400, seed: int = 9):
+    """A control-arm sample with planted Republican-minus-Democrat gaps."""
+    rng = np.random.default_rng(seed)
+    party = ["Republican"] * n + ["Democrat"] * n
+    frame = {"condition": ["Null_Control"] * (2 * n), "party_gen": party}
+    for outcome, gap in gaps.items():
+        frame[outcome] = np.concatenate(
+            [rng.normal(50 + gap, 3, n), rng.normal(50, 3, n)]
+        )
+    return pd.DataFrame(frame)
+
+
+def test_party_gaps_recover_planted_gaps_and_rank_the_models():
+    from silicon_sampling.voelkel import compare as vc
+
+    planted = {"PA": 10.0, "ADA": -6.0, "SUC": 0.0}
+    human = _control_arm(planted, seed=1)
+    flat = _control_arm({k: 0.3 * v for k, v in planted.items()}, seed=2)
+    loud = _control_arm({k: 3.0 * v for k, v in planted.items()}, seed=3)
+
+    table = vc.party_gaps(human, {"qwen25_7b": flat, "v4_flash": loud})
+    covered = table.dropna(subset=["human"])
+    assert set(covered["outcome"]) == set(planted)
+    for outcome, gap in planted.items():
+        got = float(covered.loc[covered["outcome"] == outcome, "human"].iloc[0])
+        assert abs(got - gap) < 1.0, (outcome, got, gap)
+
+    summary = vc.party_gap_summary(table).set_index("model")
+    # The flat model understates the gaps, the loud one overstates them, and both
+    # track the human ordering — which is exactly the shape the report claims.
+    assert (
+        summary.loc["Qwen2.5-7B", "mean_abs_gap"]
+        < summary.loc["human (Human 1)", "mean_abs_gap"]
+    )
+    assert (
+        summary.loc["DeepSeek-V4-Flash", "mean_abs_gap"]
+        > summary.loc["human (Human 1)", "mean_abs_gap"]
+    )
+    assert summary.loc["human (Human 1)", "corr_with_human_gaps"] == 1.0
+
+
+def test_party_gaps_ignore_treated_arms():
+    """Gaps are a control-arm quantity; an intervention arm must not leak in."""
+    from silicon_sampling.voelkel import compare as vc
+
+    human = _control_arm({"PA": 8.0}, seed=4)
+    treated = _control_arm({"PA": -40.0}, seed=5).assign(condition="Party_Overlap")
+    mixed = pd.concat([human, treated], ignore_index=True)
+    only_control = vc.party_gaps(human, {"qwen25_7b": human})
+    with_treated = vc.party_gaps(human, {"qwen25_7b": mixed})
+    a = float(only_control.loc[only_control["outcome"] == "PA", "Qwen2.5-7B"].iloc[0])
+    b = float(with_treated.loc[with_treated["outcome"] == "PA", "Qwen2.5-7B"].iloc[0])
+    assert abs(a - b) < 1e-9
+
+
 def main() -> int:
     tests = [
         v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)

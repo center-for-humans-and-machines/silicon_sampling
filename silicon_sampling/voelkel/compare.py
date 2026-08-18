@@ -23,6 +23,7 @@ import pandas as pd
 from ..analysis import plotting as viz
 from ..benchmark.reference import ate_pairs, half_split
 from ..models import label as model_label
+from . import outcomes as oc
 from . import score as S
 from .paths import REPORT, samples_dir
 
@@ -113,6 +114,68 @@ def subgroup_signal(human1: pd.DataFrame, samples: dict) -> pd.DataFrame:
                     ),
                 }
             )
+    return pd.DataFrame(rows)
+
+
+def party_gaps(human1: pd.DataFrame, samples: dict) -> pd.DataFrame:
+    """Republican minus Democrat means in the control arm, ours against theirs.
+
+    This is the *direct* version of the demographic question, and a cleaner one
+    than subgroup treatment effects: it asks whether the model puts partisans in
+    different places at all, before any intervention. Party is written into every
+    question of this instrument by name, so a model that reads its assigned
+    identity has no excuse for a flat gap — and one that reads it too eagerly
+    produces the stereotyping failure the benchmark's diagnostic exists to catch.
+    Both directions are wrong; they are wrong in opposite ways.
+    """
+    control = human1[human1["condition"] == S.CONTROL]
+    table = pd.DataFrame({"outcome": list(oc.OUTCOMES)}).set_index("outcome")
+
+    def gaps(frame: pd.DataFrame, column: str) -> pd.Series:
+        arm = frame[frame["condition"] == S.CONTROL]
+        found = {}
+        for outcome in oc.OUTCOMES:
+            if outcome not in arm.columns:
+                continue
+            means = (
+                pd.to_numeric(arm[outcome], errors="coerce")
+                .groupby(arm["party_gen"])
+                .mean()
+            )
+            if {"Republican", "Democrat"} <= set(means.index):
+                found[outcome] = means["Republican"] - means["Democrat"]
+        return pd.Series(found, name=column)
+
+    table = table.join(gaps(control, "human"))
+    for run, sample in samples.items():
+        table = table.join(gaps(sample, model_label(run)))
+    return table.reset_index()
+
+
+def party_gap_summary(table: pd.DataFrame) -> pd.DataFrame:
+    """How big each model's partisan gaps are, and whether they point the right way."""
+    rows = []
+    for column in table.columns:
+        if column in ("outcome", "human"):
+            continue
+        rows.append(
+            {
+                "model": column,
+                "mean_abs_gap": float(table[column].abs().mean()),
+                "sd_gap": float(table[column].std(ddof=1)),
+                "corr_with_human_gaps": float(table["human"].corr(table[column])),
+                "n_outcomes": int(table[column].notna().sum()),
+            }
+        )
+    rows.append(
+        {
+            "model": "human (Human 1)",
+            "mean_abs_gap": float(table["human"].abs().mean()),
+            "sd_gap": float(table["human"].std(ddof=1)),
+            "corr_with_human_gaps": 1.0,
+            "n_outcomes": int(table["human"].notna().sum()),
+        }
+    )
     return pd.DataFrame(rows)
 
 
@@ -382,6 +445,8 @@ def generate(
     )
     levels = level_errors(human1, samples)
     subgroups = subgroup_signal(human1, samples)
+    gaps = party_gaps(human1, samples)
+    gap_summary = party_gap_summary(gaps)
     diag = diagnostics(runs)
 
     pairs_by_run = {
@@ -399,12 +464,26 @@ def generate(
     if len(levels):
         _level_plot(levels, plots / "05_level_error.png")
 
-    _write(out, board, verdict, levels, subgroups, diag, samples, baseline, contender)
+    _write(
+        out,
+        board,
+        verdict,
+        levels,
+        subgroups,
+        gaps,
+        gap_summary,
+        diag,
+        samples,
+        baseline,
+        contender,
+    )
     return {
         "board": board,
         "verdict": verdict,
         "levels": levels,
         "subgroups": subgroups,
+        "party_gaps": gaps,
+        "party_gap_summary": gap_summary,
         "diagnostics": diag,
     }
 
@@ -438,7 +517,17 @@ def _verdict_sentence(verdict: pd.DataFrame, metric: str, contender: str) -> str
 
 
 def _write(
-    out, board, verdict, levels, subgroups, diag, samples, baseline, contender
+    out,
+    board,
+    verdict,
+    levels,
+    subgroups,
+    gaps,
+    gap_summary,
+    diag,
+    samples,
+    baseline,
+    contender,
 ) -> None:
     base_name, cont_name = model_label(baseline), model_label(contender)
     counts = " · ".join(f"{model_label(run)}: {len(s):,}" for run, s in samples.items())
@@ -564,6 +653,25 @@ def _write(
     ]
     if len(subgroups):
         lines += [_md(subgroups), ""]
+    lines += [
+        "Subgroup treatment effects are a hard and noisy target, though, so the",
+        "cleaner test is whether the model puts partisans in different places at all,",
+        "before any intervention. Party is named in every question of this",
+        "instrument, so a flat gap has no excuse:",
+        "",
+        _md(gaps, floats=1),
+        "",
+        _md(gap_summary, floats=2),
+        "",
+        "**The two models fail in opposite directions.** Read `mean_abs_gap` against",
+        "the human row: one sample is too flat, the other too stereotyped. A model",
+        "answering from a stereotype produces subgroup differences that are too large",
+        "and too clean; a model ignoring its assigned identity produces almost none.",
+        "The benchmark's diagnostics are built to catch the first, and the second is",
+        "the more damaging of the two for subgroup estimates — so moving from one to",
+        "the other is not simply progress.",
+        "",
+    ]
     lines += [
         "## What the samplers did",
         "",
