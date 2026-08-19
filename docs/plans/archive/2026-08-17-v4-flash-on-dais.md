@@ -1,4 +1,4 @@
-# [ACTIVE] Resample both studies with DeepSeek-V4-Flash-Base on DAIS
+# [DONE] Resample both studies with DeepSeek-V4-Flash-Base on DAIS
 
 Task: [docs/tasks/v4_flash_on_DAIS.md](../tasks/v4_flash_on_DAIS.md)
 
@@ -8,6 +8,30 @@ V4-Flash against Qwen2.5-7B and — for Voelkel — against real humans. The que
 being answered is **does a much bigger base model make silicon sampling more
 faithful**, so every deliverable is a paired comparison, not a fresh set of
 numbers.
+
+## Outcome
+
+**Scaling the base model ~40x bought a much more realistic sample and no better
+prediction of which interventions work.**
+
+| | measured |
+| --- | --- |
+| Voelkel level error | 22.9 -> **8.0** points on a 0-100 scale |
+| Voelkel effect over-spread | 2.6x -> **1.7x** the true spread |
+| Voelkel rank correlation with real effects | 0.31 -> **0.19** (human replication 0.40) |
+| Voelkel RMSE | 3.62 -> **2.81**, the only near-settled delta (p 0.94) |
+| Pfänder partisan gap, climate belief | -1.1 -> **-12.4** pp |
+| Pfänder moderator R² beyond condition | 0.0020 -> **0.0373** |
+| the two models' agreement on which messages work | r = **0.17** on the primary outcome |
+
+Reports: [Voelkel](../reports/voelkel_validation/05_model_comparison.md) (the one
+with ground truth) and [Pfänder](../reports/pfander_silicon_sample/05_model_comparison.md).
+
+No effect-recovery delta clears its interval, so the honest reading is "no
+improvement, possibly a regression" rather than a demonstrated regression.
+Everything that *did* improve — level accuracy, exaggeration, demographic
+responsiveness — is a property of how a respondent answers in isolation. The thing
+that did not is the one the megastudy scores.
 
 ## What the checkpoint actually is
 
@@ -223,7 +247,19 @@ actually costs enough that 4xH200 holds 27-50 transcripts, not 512. Since
 throughput is linear in group size, that single number carried the whole
 headline. Everything downstream of an engine-reported KV figure was fine.
 
-### 5. Full runs, then pull down
+### 5. Full runs, then pull down — done
+
+Both complete: Voelkel 6,203 (two jobs, the first killed at its 3 h wall at 88%),
+Pfänder 18,000 (two jobs, the first killed at its 14 h wall at 97%). Final
+throughput **1,022-1,245 respondents/h** on 4xH200, rejection 5.1-6.7%, zero forced
+defaults in either study.
+
+**What actually cost time, in order:** queue waits (up to 10 h for a whole-node
+job, ~7 h for a 4-GPU one at its worst), then the two throughput traps
+(oversubscribed group size, cold TileLang cache), then the sampling itself. The
+plan budgeted for none of the first and all of the last.
+
+### 5-original. Full runs, then pull down
 
 Voelkel first — it is smaller and it is the only one with ground truth, so it
 answers the task's question on its own if anything goes wrong with the other.

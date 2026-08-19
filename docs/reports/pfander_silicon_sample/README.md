@@ -4,10 +4,45 @@ Qwen2.5-7B (base), sampled respondent by respondent through a text transcript of
 the full instrument. **N = 18,000** synthetic respondents across
 17 conditions (2,000 control, 1,000 per intervention).
 
+The same 18,000 profiles were later resampled with **DeepSeek-V4-Flash-Base
+(~290 B)** — see [sub-report 5](05_model_comparison.md). Everything below describes
+the Qwen sample.
+
 Sub-reports: [1 · intervention effects](01_effects.md) ·
 [2 · demographics](02_demographics.md) ·
 [3 · distributions](03_distributions.md) ·
-[4 · sampling diagnostics](04_diagnostics.md)
+[4 · sampling diagnostics](04_diagnostics.md) ·
+[5 · Qwen2.5-7B against DeepSeek-V4-Flash](05_model_comparison.md)
+
+## What a 40x bigger base model changed
+
+**[Full comparison →](05_model_comparison.md)**, structured around four questions.
+The short version, with the caveat that this study publishes no human data so only
+two of the four can be answered here:
+
+| | Qwen2.5-7B | DeepSeek-V4-Flash |
+| --- | --- | --- |
+| partisan gap, belief in human-caused climate change | -1.1 pp | **-12.4 pp** |
+| largest moderator R² beyond condition | 0.0020 | **0.0373** |
+| spread of the 16 intervention effects | — | **0.48x** Qwen's (median) |
+| agreement with the other model on which messages work | r = 0.17 on the primary outcome, median 0.10 across all 13 | |
+
+Two findings matter for a submission built on this pipeline.
+
+**The demographic flatness described below is substantially fixed.** The partisan
+gap on climate belief was this sample's headline weakness at 1.1 points where real
+US survey data has tens; the bigger model produces 12.4. Still short of reality,
+an order of magnitude closer. But the
+[Voelkel validation](../voelkel_validation/05_model_comparison.md) shows that the
+extra demographic variation does not point the *right* way — so read it as more
+variation, not better variation.
+
+**The intervention ranking is a property of the sampler, not of the messages.**
+The two models' 16 effects correlate at r = 0.17 on the primary outcome and
+negatively on four of the thirteen outcomes. At most one of these rankings tracks
+reality, and against real responses neither does it well. Whichever model is
+submitted, the message ordering should not be presented as a finding about the
+messages.
 
 ## Headline
 
