@@ -299,74 +299,16 @@ def generate(
     diag = diagnostics(runs)
 
     _effect_scatter(tables, baseline, contender, plots / "05_effect_agreement.png")
-
-    base_name, cont_name = model_label(baseline), model_label(contender)
-    primary_row = agreement[agreement["outcome"] == PRIMARY]
-    primary_r = (
-        float(primary_row["pearson_r"].iloc[0]) if len(primary_row) else float("nan")
-    )
-
-    lines = [
-        f"# {base_name} against {cont_name}",
-        "",
-        "[← main report](README.md)",
-        "",
-        "The Pfänder megastudy publishes no human data, so nothing here says which",
-        "model is *right* — that question is answered in the",
-        "[Voelkel validation](../voelkel_validation/05_model_comparison.md), which has",
-        "real responses to score against. What this can say is whether the two",
-        "models agree, whether the bigger one reads its assigned demographics, and",
-        "whether it still produces something survey-shaped.",
-        "",
-        "Both models sampled the same 18,000 profiles with the same seeds.",
-        "",
-        "## Do they agree on which messages work?",
-        "",
-        "On the primary outcome the two models' 16 intervention effects correlate at",
-        f"**r = {primary_r:.3f}**.",
-        "",
-        _md(agreement),
-        "",
-        "`sd_ratio` above 1 means the contender spreads the interventions further",
-        "apart than the baseline did. That matters on its own: the Voelkel check",
-        "found the smaller model's effects **2.6x too spread out**, so more spread",
-        "here is not automatically better.",
-        "",
-        "![Effect agreement](plots/05_effect_agreement.png)",
-        "",
-        "## Does it condition on who it is supposed to be?",
-        "",
-        "This is the smaller model's sharpest failure. It writes a party identity, an",
-        "income and an education into the transcript and then answers the rest of the",
-        "questionnaire as if it had not.",
-        "",
-        "Variance a moderator explains *beyond condition*, over all six moderators",
-        "and all thirteen outcomes:",
-        "",
-        _md(demographics, floats=5),
-        "",
-        "And the single sharpest case — belief in human-caused climate change by",
-        "party, where real US survey data shows one of the largest and most reliable",
-        "gaps in public opinion, routinely tens of points:",
-        "",
-        _md(gap, floats=2),
-        "",
-        "## Does it still look like survey data?",
-        "",
-        _md(likeness, floats=4),
-        "",
-        "`primary_modal_share` is the fraction of respondents giving the single most",
-        "common answer on the primary outcome; `mean_share_flat` the fraction giving",
-        "an identical answer to every item of a battery. A model that has stopped",
-        "behaving like a respondent shows up in these before it shows up anywhere else.",
-        "",
-        "## What the samplers did",
-        "",
-        _md(diag, floats=4) if len(diag) else "No run metadata found.",
-        "",
-    ]
-    (out / "05_model_comparison.md").write_text(
-        "\n".join(lines) + "\n", encoding="utf-8"
+    _write(
+        out,
+        agreement,
+        demographics,
+        gap,
+        likeness,
+        diag,
+        baseline,
+        contender,
+        {run: len(sample) for run, sample in samples.items()},
     )
     return {
         "agreement": agreement,
@@ -375,3 +317,209 @@ def generate(
         "survey_likeness": likeness,
         "diagnostics": diag,
     }
+
+
+def _write(
+    out,
+    agreement,
+    demographics,
+    gap,
+    likeness,
+    diag,
+    baseline,
+    contender,
+    n_by_run,
+) -> None:
+    base_name, cont_name = model_label(baseline), model_label(contender)
+
+    def _cell(frame, key, column, key_column="model"):
+        hit = frame[frame[key_column] == key]
+        return float(hit[column].iloc[0]) if len(hit) else float("nan")
+
+    primary = agreement[agreement["outcome"] == PRIMARY]
+    primary_r = float(primary["pearson_r"].iloc[0]) if len(primary) else float("nan")
+    median_r = (
+        float(agreement["pearson_r"].median()) if len(agreement) else float("nan")
+    )
+    median_sd_ratio = (
+        float(agreement["sd_ratio"].median()) if len(agreement) else float("nan")
+    )
+    counts = " · ".join(f"{model_label(r)}: {n:,}" for r, n in n_by_run.items())
+
+    lines = [
+        "# The same four questions, on the Pfänder instrument",
+        "",
+        "[← main report](README.md)",
+        "",
+        f"{base_name} against {cont_name} over the same 18,000 respondent profiles with",
+        "the same seeds, so the two samples are paired respondent by respondent.",
+        f"Respondents: {counts}.",
+        "",
+        "**The megastudy publishes no human data, by design.** So this report cannot say",
+        "which model is *right* about anything. Two of the four questions still get a",
+        "full answer here, one gets a useful partial answer, and one has to be sent",
+        "next door to the [Voelkel validation](../voelkel_validation/05_model_comparison.md),",
+        "which has real responses to score against.",
+        "",
+        "## The answers, in short",
+        "",
+        "| question | can this study answer it? | what it says |",
+        "| --- | --- | --- |",
+        f"| **1.** Over- or underestimating effect sizes? | Partly — no truth to compare to, "
+        f"but the two models can be compared to each other | {cont_name}'s effects are much "
+        f"smaller: median spread ratio **{median_sd_ratio:.2f}** of {base_name}'s. Voelkel says "
+        "both still overestimate, so this is a move in the right direction. |",
+        f"| **2.** Right rank order and direction? | No — but it can ask whether the ranking "
+        f"is a property of the *messages* or of the *model* | **It is the model.** The two "
+        f"models' 16 intervention effects correlate at **r = {primary_r:.2f}** on the primary "
+        f"outcome (median {median_r:.2f} across outcomes). At most one of them can be right. |",
+        f"| **3.** Do predictions change with demographics? | Yes, fully | **Much more than "
+        f"before.** Largest variance a moderator explains beyond condition: "
+        f"**{_cell(demographics, base_name, 'max_r2_moderator'):.4f} -> "
+        f"{_cell(demographics, cont_name, 'max_r2_moderator'):.4f}**. |",
+        "| **4.** Using demographics to their advantage? | **No — needs ground truth** | See "
+        "Voelkel: neither model's demographic variation points the right way. |",
+        "",
+        "---",
+        "",
+        "## 1. How big are the effects each model reports?",
+        "",
+        f"**{cont_name} reports much smaller effects than {base_name} on almost every",
+        "outcome.** Without human data this cannot be scored, but it is the same",
+        "direction the Voelkel check measures against real responses, where both models",
+        "overestimate and the bigger one overestimates less.",
+        "",
+        _md(agreement, floats=3),
+        "",
+        "`sd_ratio` is the spread of the contender's 16 intervention effects over the",
+        f"baseline's. Below 1 means {cont_name} spreads the messages less far apart. It is",
+        f"below 1 on {int((agreement['sd_ratio'] < 1).sum())} of {len(agreement)} outcomes,",
+        f"with a median of **{median_sd_ratio:.2f}** — so the bigger model thinks these",
+        "messages do roughly a third to two thirds of what the smaller one thought.",
+        "",
+        f"On the primary outcome the mean effect falls from "
+        f"**{_cell(agreement, PRIMARY, f'mean_{baseline}', 'outcome'):.2f}** to "
+        f"**{_cell(agreement, PRIMARY, f'mean_{contender}', 'outcome'):.2f}** scale points.",
+        "",
+        "---",
+        "",
+        "## 2. Do the two models agree on which messages work?",
+        "",
+        "**Barely — which means the intervention ranking is a property of the sampler,",
+        "not of the messages.**",
+        "",
+        "This is the strongest thing this study can say about rank order without human",
+        "data. If two samplers agreed closely, the ranking would at least be a stable",
+        "feature of the stimuli. They do not:",
+        "",
+        f"- primary outcome (`{PRIMARY}`): **r = {primary_r:.2f}**, rank correlation "
+        f"{float(primary['spearman_rho'].iloc[0]) if len(primary) else float('nan'):.2f}",
+        f"- across all 13 outcomes the median correlation is **{median_r:.2f}**, ranging from "
+        f"{agreement['pearson_r'].min():.2f} to {agreement['pearson_r'].max():.2f}",
+        f"- on {int((agreement['pearson_r'] < 0).sum())} of {len(agreement)} outcomes the two "
+        "models are *negatively* correlated — they disagree about the sign of the ranking",
+        "",
+        "So at most one of these two samples is tracking the real ordering, and the",
+        "Voelkel scoring says that whichever it is, it is not doing it well: rank",
+        "correlation with real effects was 0.31 for the smaller model and 0.19 for the",
+        "bigger one, against 0.40 for a fresh human sample.",
+        "",
+        "**What this means for a submission.** The 16-message ranking this pipeline",
+        "produces should not be read as a property of the messages. Change the base",
+        "model and you get a substantially different ranking, with no way to tell from",
+        "inside the study which one to believe.",
+        "",
+        "![Effect agreement on the primary outcome](plots/05_effect_agreement.png)",
+        "",
+        "`sign_agreement` in the table above is the fraction of the 16 interventions the",
+        "two models at least push in the same direction — high on the trust outcomes,",
+        "near chance on the policy ones.",
+        "",
+        "---",
+        "",
+        "## 3. Do the models change their predictions based on demographics?",
+        "",
+        f"**Yes, and {cont_name} does so far more than {base_name}.** This was the",
+        "smaller model's sharpest failure: it wrote a party identity, an income and an",
+        "education into the transcript and then answered as if it had not.",
+        "",
+        "Variance a moderator explains *beyond condition*, across all six moderators and",
+        "all thirteen outcomes:",
+        "",
+        _md(demographics.drop(columns=["run"], errors="ignore"), floats=5),
+        "",
+        "And the sharpest single case — belief in human-caused climate change by party,",
+        "one of the largest and most reliable divides in US public opinion, routinely",
+        "tens of points:",
+        "",
+        _md(gap.drop(columns=["run"], errors="ignore"), floats=2),
+        "",
+        f"{base_name} produced a **{abs(_cell(gap, base_name, 'gap')):.1f}-point** gap where",
+        "reality has tens. That was the finding that made the first sample's subgroup",
+        f"estimates close to constants. {cont_name} produces",
+        f"**{abs(_cell(gap, cont_name, 'gap')):.1f} points** — still short of the real divide, but an",
+        "order of magnitude closer, and in the right direction.",
+        "",
+        "---",
+        "",
+        "## 4. Are they using demographics to their advantage?",
+        "",
+        "**This study cannot tell**, and it is worth being clear about why rather than",
+        "reaching for a proxy. Question 3 shows the demographics move the answers; whether",
+        "they move them *correctly* needs real subgroup responses to compare against, and",
+        "the megastudy publishes none.",
+        "",
+        "[The Voelkel validation answers it](../voelkel_validation/05_model_comparison.md):",
+        "**no, neither model.** The moderators a model could read in the transcript",
+        "predict its subgroup effects no better than the two it never saw — dead even for",
+        f"{base_name}, and backwards for {cont_name}. So the larger demographic",
+        "responsiveness measured above should be read as larger variation, not better",
+        "variation, until something demonstrates otherwise.",
+        "",
+        "---",
+        "",
+        "## Does it still look like survey data?",
+        "",
+        "A model that has stopped behaving like a respondent shows up here before it",
+        "shows up in any effect estimate.",
+        "",
+        _md(likeness.drop(columns=["run"], errors="ignore"), floats=4),
+        "",
+        "`primary_modal_share` is the fraction of respondents giving the single most",
+        "common answer on the primary outcome, `mean_share_flat` the fraction giving an",
+        "identical answer to every item of a battery, and `mean_alpha` the average",
+        "internal consistency of the multi-item scales.",
+        "",
+        f"Both samples pass. {cont_name} straightlines somewhat more "
+        f"({_cell(likeness, cont_name, 'mean_share_flat'):.1%} of battery profiles flat against "
+        f"{_cell(likeness, base_name, 'mean_share_flat'):.1%}) and rounds to multiples of ten "
+        "slightly more often, neither at a level that would make the sample unusable. Scale",
+        "reliability is essentially unchanged.",
+        "",
+        "---",
+        "",
+        "## What the samplers did",
+        "",
+        _md(diag, floats=4) if len(diag) else "No run metadata found.",
+        "",
+        "## Caveats",
+        "",
+        "1. **No human data, by design.** Nothing here is validated against ground truth;",
+        "   questions 2 and 4 are answered next door or not at all.",
+        "2. **The two runs differ in KV-cache precision.** DeepSeek-V4-Flash requires",
+        "   `fp8_ds_mla` — vLLM's FlashMLA attention for this model *is* the fp8 layout and",
+        "   will not start otherwise — while the Qwen run used bf16 KV. The checkpoint",
+        "   ships the UE8M0 scales, so this is the model's native precision rather than a",
+        "   compromise, but the asymmetry cannot be ruled out as a contributor.",
+        "3. **Gender, age and race were pre-filled** from the preregistered census quotas;",
+        "   education, income and party were generated by the model. The moderator",
+        "   analysis above mixes both kinds.",
+        "4. **The throughput row covers only the final resumed pass**, not the whole run:",
+        "   a job killed at its wall-time limit writes no `run_meta.json`, so the",
+        "   respondents-per-hour and rejection figures describe the segment that finished",
+        "   cleanly.",
+        "",
+    ]
+    (out / "05_model_comparison.md").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
