@@ -20,7 +20,7 @@ Locked-down settings (slurm template, bind mounts, env vars) are baked into the 
 Default image: `/dais/fs/scratch/ykeller/containers/apptainer/glm_52_vllm.sif`.
 Optional: `/dais/fs/scratch/ykeller/containers/apptainer/vllm-openai_latest.sif`.
 
-Jobs may use **1 or 2 nodes** (`n_nodes` 1–2). GPUs per node: 1–8. Default GPU type `h200`, default `--mem 0` (whole node). Wall-time cap on DAIS is 24h.
+Jobs may use **1 or 2 nodes** (`n_nodes` 1–2). GPUs per node: 1–8. Omit `gpu_type` to request any GPU; default `--mem 0` (whole node). Wall-time cap on DAIS is 24h.
 
 Connection to DAIS requires an active SSH connection established by a human operator. If commands prompt for a password or SSH fails, stop and tell the user. Do not try to work around a missing DAIS connection.
 
@@ -73,6 +73,11 @@ Run `squeue --me` on the login node. Returns a `run_id`; poll it to see queued/r
 
 Query params: `cluster=dais` (required).
 
+### `GET /sinfo`
+Run bare `sinfo` on the login node (no extra flags). Returns a `run_id`; poll it or `Read` the log to see partition/node state.
+
+Query params: `cluster=dais` (required).
+
 ### `POST /cancel_job`
 Run `scancel <jobid>` on the login node.
 
@@ -95,7 +100,7 @@ Body:
 | `project` | str | Same identifier rule. |
 | `acc_config` | str? | Optional, `configs/accelerate/<name>.ya?ml`. |
 | `mem` | str? | SLURM `--mem` (e.g. `0` for whole node, `64G`). Defaults to `0`. |
-| `gpu_type` | str? | SLURM gres GPU type (e.g. `h200`). Defaults to `h200`. |
+| `gpu_type` | str? | Pin `h200` or `b200`. Omit to request any GPU (`--gres=gpu:N`). |
 | `container` | str? | Main job image; allowlist: `glm_52_vllm.sif` (default) + `vllm-openai_latest.sif`. |
 | `vllm_servers` | object[]? | Optional vLLM sidecar servers in `vllm-openai_latest.sif` before the main container. **Requires `n_nodes=1`.** |
 
@@ -149,6 +154,7 @@ curl -s -X POST http://cc_command_server:8765/request_single_gpu \
 sleep 5
 curl -s http://cc_command_server:8765/runs/<run_id>           # "salloc: Pending job allocation <jobid>"
 curl -s 'http://cc_command_server:8765/jobs?cluster=dais'     # poll returned run_id; state PD = pending
+curl -s 'http://cc_command_server:8765/sinfo?cluster=dais'    # then poll; node/partition idle vs allocated
 ```
 
 **Run a command on a live GPU allocation:**
@@ -158,15 +164,16 @@ curl -s -X POST http://cc_command_server:8765/run_in_job \
   -d '{"cluster": "dais", "jobid": "12345", "command": "nvidia-smi"}'
 ```
 
-**Submit a 2-node job (default glm_52_vllm.sif):**
+**Submit a 2-node job (default glm_52_vllm.sif, any GPU):**
 ```bash
 curl -s -X POST http://cc_command_server:8765/submit_slurm_job \
   -H 'Content-Type: application/json' \
   -d '{"cluster": "dais", "program_call": "python -m silicon_sampling ...", "time": "04:00:00",
        "n_gpu": 8, "n_nodes": 2, "n_cpu": 96, "launcher": "torchrun",
-       "run_group": "exp1", "project": "silicon_sampling",
-       "gpu_type": "h200"}'
+       "run_group": "exp1", "project": "silicon_sampling"}'
 ```
+
+Pin a GPU type with `"gpu_type": "h200"` or `"gpu_type": "b200"`.
 
 **Sync repo to DAIS, then monitor:**
 ```bash
