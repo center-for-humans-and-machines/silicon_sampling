@@ -278,6 +278,7 @@ def recompose_frame(
     bounds: dict[str, tuple[float, float]] | None = None,
     seed: int = 0,
     couple_residuals: bool = True,
+    resample_residuals: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Rebuild every outcome in ``parts`` onto ``template``'s rows.
 
@@ -297,6 +298,17 @@ def recompose_frame(
     across.  Set it to ``False`` only to reproduce the older independent-draw
     behaviour.
 
+    ``resample_residuals`` should be true only when the residuals come from a
+    *different* run than the template.  When they are the template's own, pairing
+    each row with its own residual makes the reconstruction an exact inverse of the
+    decomposition, and that matters most exactly where it is easiest to miss: on a
+    saturated outcome.  ``belief_post`` has 36.5% of its answers at 100 and
+    ``donation_ams`` 29% at zero, so a residual drawn from another row and added to
+    this row's prediction clips asymmetrically at the bound, and the achievable
+    mean falls short of the target.  That put 0.272 raw points of drift on
+    ``belief_post`` — about three quarters of a shrunk effect — for a calibration
+    that never intended to touch the residuals at all.
+
     Returns the rebuilt frame and a per-outcome audit of how far the realised
     condition means ended up from their targets.  The audit is the point: a
     calibration is only meaningful if it moved what it claimed to move, and the
@@ -304,7 +316,12 @@ def recompose_frame(
     """
     out = template.copy()
     drift = []
-    donors = _shared_donors(parts, len(template), seed) if couple_residuals else None
+    if not resample_residuals:
+        donors = np.arange(len(template))
+    elif couple_residuals:
+        donors = _shared_donors(parts, len(template), seed)
+    else:
+        donors = None
     for index, (outcome, part) in enumerate(parts.items()):
         limits = (bounds or {}).get(outcome, (0.0, 100.0))
         out[outcome] = recompose(
@@ -380,4 +397,5 @@ def hybrid(
         bounds=bounds,
         seed=seed,
         couple_residuals=couple_residuals,
+        resample_residuals=residuals_from != effects_from,
     )

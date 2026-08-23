@@ -78,7 +78,10 @@ def global_shrink(
 
 
 def shrink_within_outcome(
-    effects: pd.DataFrame, factor: float, column: str = "estimate"
+    effects: pd.DataFrame,
+    factor: float,
+    column: str = "estimate",
+    reference: str | None = None,
 ) -> pd.DataFrame:
     """Shrink each effect toward its own outcome's mean, leaving the profile alone.
 
@@ -87,14 +90,38 @@ def shrink_within_outcome(
     we predict better (which outcome).  Fit ``factor`` per model — the direction
     held in 6 of 6 leave-one-condition-out folds on Voelkel but the magnitude in
     only 3 of 6, so a conservative 0.5 is preferred to an optimised value.
+
+    ``reference`` names the control condition, if the table carries a row for it.
+    That row is not an effect — it is identically zero by construction — so it
+    must be excluded from the outcome mean and left alone.  Including it gave the
+    control arm a spurious effect of +1.71 pp on ``belief_post``, which then moved
+    the control *level* of the rebuilt file: a transform meant to touch only the
+    message ranking silently relocated the baseline every effect is measured from.
+    A table with no control row (the shape :func:`ate_pairs` produces) is
+    unaffected either way.
     """
     _require(effects, "outcome")
     out = effects.copy()
-    means = out.groupby("outcome")[column].transform("mean")
-    out[column] = means + factor * (out[column] - means)
+    movable = _movable(out, reference)
+    means = (
+        out.loc[movable]
+        .groupby("outcome")[column]
+        .mean()
+        .reindex(out["outcome"])
+        .to_numpy()
+    )
+    shrunk = np.where(movable, means + factor * (out[column].to_numpy() - means), 0.0)
+    out[column] = np.where(np.isnan(shrunk), out[column], shrunk)
     if "se" in out.columns:
-        out["se"] = out["se"] * factor
+        out.loc[movable, "se"] = out.loc[movable, "se"] * factor
     return out
+
+
+def _movable(effects: pd.DataFrame, reference: str | None) -> np.ndarray:
+    """Rows that are genuine effects, i.e. everything but the reference condition."""
+    if reference is None or "condition" not in effects.columns:
+        return np.ones(len(effects), dtype=bool)
+    return (effects["condition"] != reference).to_numpy()
 
 
 def substitute_profile(
@@ -102,6 +129,7 @@ def substitute_profile(
     anchor: pd.Series | pd.DataFrame,
     weight: float,
     column: str = "estimate",
+    reference: str | None = None,
 ) -> pd.DataFrame:
     """Blend our per-outcome mean effect toward an externally supplied one.
 
@@ -118,10 +146,19 @@ def substitute_profile(
     if isinstance(anchor, pd.DataFrame):
         anchor = anchor.set_index("outcome")[column]
     out = effects.copy()
-    ours = out.groupby("outcome")[column].transform("mean")
-    theirs = out["outcome"].map(anchor)
-    blended = np.where(theirs.isna(), ours, weight * theirs + (1 - weight) * ours)
-    out[column] = blended + (out[column] - ours)
+    movable = _movable(out, reference)
+    ours = (
+        out.loc[movable]
+        .groupby("outcome")[column]
+        .mean()
+        .reindex(out["outcome"])
+        .to_numpy()
+    )
+    theirs = out["outcome"].map(anchor).to_numpy(dtype=float)
+    blended = np.where(np.isnan(theirs), ours, weight * theirs + (1 - weight) * ours)
+    moved = blended + (out[column].to_numpy() - ours)
+    out[column] = np.where(movable & ~np.isnan(moved), moved, out[column])
+    out.loc[~movable, column] = 0.0
     return out
 
 
@@ -130,6 +167,7 @@ def flatten_outcomes(
     outcomes: set[str] | tuple[str, ...],
     factor: float = 0.2,
     column: str = "estimate",
+    reference: str | None = None,
 ) -> pd.DataFrame:
     """Shrink named outcomes' *within-outcome* spread hard, keeping their profile.
 
@@ -146,7 +184,9 @@ def flatten_outcomes(
     picked = effects["outcome"].isin(set(outcomes))
     if not picked.any():
         return effects.copy()
-    shrunk = shrink_within_outcome(effects.loc[picked], factor, column=column)
+    shrunk = shrink_within_outcome(
+        effects.loc[picked], factor, column=column, reference=reference
+    )
     out = effects.copy()
     out.loc[picked, column] = shrunk[column]
     if "se" in out.columns:

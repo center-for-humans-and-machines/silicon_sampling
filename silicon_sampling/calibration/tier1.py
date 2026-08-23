@@ -209,8 +209,31 @@ def calibrate(
     if targets is not None and targets_in_pp:
         targets = pp_to_raw(targets, instrument=design)
 
+    # A composite is rebuilt through its items, never beside them.  Recomposing
+    # the composite directly draws it a fresh residual, and the twelve items then
+    # have to absorb a shift of that size to stay consistent with it — which clips
+    # against the scale and put 0.27 raw points of drift on the primary outcome,
+    # 36% of a shrunk effect.  Giving each item the composite's target effect makes
+    # their mean carry that effect exactly, while each item keeps its own level,
+    # demographic offsets and residual.
+    composites = {
+        name: [item for item in items if item in frame.columns]
+        for name, items in design.composites.items()
+        if name in frame.columns
+    }
+    composites = {
+        name: items
+        for name, items in composites.items()
+        if len(items) == len(design.composites[name])
+    }
+    via_items = {item for items in composites.values() for item in items}
+
     continuous = [
-        name for name in outcomes if name not in design.binary and name in frame.columns
+        name
+        for name in outcomes
+        if name not in design.binary
+        and name not in composites
+        and name in frame.columns
     ]
     parts: dict[str, Decomposition] = {}
     for outcome in continuous:
@@ -223,8 +246,28 @@ def calibrate(
             residuals=part.residuals,
         )
 
+    for name, items in composites.items():
+        composite_part = decompose(frame, name, moderators, control)
+        wanted_level = (levels or {}).get(name)
+        shift = 0.0 if wanted_level is None else wanted_level - composite_part.level
+        wanted_effects = _target_effects(frame, name, targets, control)
+        for item in items:
+            item_part = decompose(frame, item, moderators, control)
+            parts[item] = Decomposition(
+                outcome=item,
+                level=item_part.level + shift,
+                effects=wanted_effects,
+                offsets=(offsets or {}).get(name, item_part.offsets),
+                residuals=item_part.residuals,
+            )
+
     bounds = {name: (0.0, scale_of(name, design)) for name in continuous}
-    rebuilt, drift = recompose_frame(frame, parts, control, bounds=bounds, seed=seed)
+    bounds.update({item: (0.0, 100.0) for item in via_items})
+    rebuilt, drift = recompose_frame(
+        frame, parts, control, bounds=bounds, seed=seed, resample_residuals=False
+    )
+    for name, items in composites.items():
+        rebuilt[name] = rebuilt[items].mean(axis=1)
 
     for outcome in design.binary:
         if outcome not in frame.columns:
@@ -237,8 +280,12 @@ def calibrate(
             control=control,
         ).astype(int)
 
-    rebuilt = align_composites(frame, rebuilt, design)
     return rebuilt, _audit(frame, rebuilt, parts, targets, drift, design)
+
+
+def _composite_items(design: Instrument) -> set[str]:
+    """Items that exist only to carry a composite, and are not scored themselves."""
+    return {item for items in design.composites.values() for item in items}
 
 
 def _audit(
@@ -260,9 +307,10 @@ def _audit(
     audit at all.
     """
     rows = []
-    for outcome in list(parts) + [
-        name for name in design.binary if name in rebuilt.columns
-    ]:
+    audited = [name for name in parts if name not in _composite_items(design)]
+    audited += [name for name in design.composites if name in rebuilt.columns]
+    audited += [name for name in design.binary if name in rebuilt.columns]
+    for outcome in audited:
         wanted = _target_effects(original, outcome, targets, design.control)
         realised = condition_effects(rebuilt, outcome, design.control)
         shared = realised.index.intersection(wanted.index)
@@ -392,16 +440,22 @@ def _shift_to_row_mean(
     return values
 
 
-def composite_consistency(frame: pd.DataFrame) -> float:
-    """Largest gap between the composite and its items' mean, the check's tolerance.
+def composite_consistency(
+    frame: pd.DataFrame, design: Instrument | None = None
+) -> float:
+    """Largest gap between any composite and its items' mean, across the whole file.
 
     The format gate warns above 0.5, so this is the number to assert on before
-    writing a submission.
+    writing a submission.  Returns NaN when the instrument declares no composite,
+    or when a declared one is missing items from the frame — a missing check is
+    reported as unknown rather than as a pass.
     """
-    present = [item for item in TRUST_ITEMS if item in frame.columns]
-    if "trust_multidimensional" not in frame.columns or len(present) != len(
-        TRUST_ITEMS
-    ):
-        return float("nan")
-    gap = (frame[present].mean(axis=1) - frame["trust_multidimensional"]).abs()
-    return float(gap.max())
+    design = design or pfander_instrument()
+    worst = float("nan")
+    for composite, items in design.composites.items():
+        present = [item for item in items if item in frame.columns]
+        if composite not in frame.columns or len(present) != len(items):
+            continue
+        gap = float((frame[present].mean(axis=1) - frame[composite]).abs().max())
+        worst = gap if np.isnan(worst) else max(worst, gap)
+    return worst
