@@ -157,22 +157,26 @@ def test_shrinkage_holds_the_reference_condition_at_zero():
 
 def test_describe_names_every_moving_part():
     text = R.describe(R.hybrid_default(effects_from=("a", "b"), grounded="c"))
-    assert "a+b" in text and "levels=c" in text
-    assert "shrink" not in text, "the default no longer shrinks; see hybrid_default"
-    assert "shrink=0.46" in R.describe(
-        R.hybrid_default(effects_from=("a", "b"), grounded="c", shrink=0.46)
+    assert "a+b" in text and "levels=c" in text and "shrink" in text
+    assert "shrink" not in R.describe(
+        R.hybrid_default(effects_from=("a", "b"), grounded="c", shrink=None)
     )
 
 
-def test_the_default_recipe_does_not_shrink():
-    """Shrinkage is a variant, not a default.
+def test_the_default_shrinks_at_the_measured_ratio():
+    """Shrinkage is on by default, and 0.2 is the number that transfers.
 
-    The factor is the ratio of real effects to ours, and real effects differ 4.5x
-    between the reference studies (Voelkel 1.125 pp, Goldwert 2.967, ICPC 5.035).
-    Against our 2.46 pp the implied factor spans 0.46 to 2.04 — across 1.0 — so the
-    direction of the correction is undetermined and defaulting to Voelkel's 0.159
-    would under-predict a climate target by 8-13x.
+    Absolute human effect magnitudes differ 4.5-fold across the reference studies,
+    so no absolute effect *target* transfers — but the RMSE-optimal *ratio* does.
+    Measured on matched pairs it is 0.112-0.226 across every (study, model) cell,
+    and leave-one-study-out puts its out-of-fold estimates at 0.198-0.222.
+
+    The distinction matters because an earlier version of this project dropped
+    shrinkage entirely after comparing our effects against human effects computed
+    on other studies' pair sets, which is not a comparison at all.
     """
-    assert R.hybrid_default().shrink is None
+    assert R.hybrid_default().shrink == pytest.approx(R.GLOBAL_SHRINK)
+    assert 0.1 < R.GLOBAL_SHRINK < 0.3
     scale = R.HUMAN_EFFECT_SCALE
+    # the absolute magnitudes really do disagree; it is the ratio that does not
     assert max(scale.values()) / min(scale.values()) > 4.0
