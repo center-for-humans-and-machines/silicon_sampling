@@ -37,6 +37,17 @@ effect beyond weighting is — a caveat that matters little here, since the SEs 
 out near 0.5-1.2 points and the conversion ambiguity above is four to eight times
 larger.
 
+**Some items need no conversion at all.**  Goldwert's donation is whole dollars
+out of ten and Pfänder's is whole dollars out of ten; its newsletter signup is 0/1
+and so is Pfänder's.  For those the honest transform is the identity, and
+:func:`native` is it.  Neither the bin-midpoint alternative nor Sheppard's
+correction applies to them, and the reason is the same in both cases: those two
+adjustments exist to remove granularity the *target* scale does not have, and here
+the target has exactly the same granularity.  Reporting a conversion spread of
+zero for a native item is not a missing number, it is the correct one, and it is
+the one respect in which a behavioural anchor is on firmer ground than the trust
+battery.
+
 **Dispersion** is reported twice for the same reason.  A five-option answer
 converted to sliders has all its mass on five spikes 25 points apart, and
 grouping a continuous variable that coarsely inflates its variance by about
@@ -137,6 +148,25 @@ def sheppard_sd(sd: float, options: int, scale: float = 100.0) -> float:
     return float(np.sqrt(corrected)) if corrected > 0 else 0.0
 
 
+def native(
+    values: pd.Series,
+    lo: float,
+    hi: float,
+    missing_codes: tuple[float, ...] = (),
+) -> pd.Series:
+    """No conversion: the source item already lives on the Pfänder outcome's scale.
+
+    Still filtered, because "no conversion" is not "no cleaning": out-of-range
+    values and declared missing codes drop exactly as they do on the Likert path,
+    and letting a stray sentinel through here would be worse than on a 1-5 item
+    since there is no option count to catch it.
+    """
+    numeric = pd.to_numeric(values, errors="coerce")
+    if missing_codes:
+        numeric = numeric.where(~numeric.isin(list(missing_codes)))
+    return numeric.where((numeric >= lo) & (numeric <= hi))
+
+
 def weighted_moments(values: pd.Series, weights: pd.Series) -> Weighted:
     """Weighted mean, SD and SE over the rows where both are present."""
     numeric = pd.to_numeric(values, errors="coerce")
@@ -163,11 +193,12 @@ def weighted_moments(values: pd.Series, weights: pd.Series) -> Weighted:
 def composite(
     frame: pd.DataFrame,
     items: tuple[str, ...],
-    options: int,
+    options: int | None = None,
     missing_codes: tuple[float, ...] = (),
     scale: float = 100.0,
     min_answered: int | None = None,
     midpoint: bool = False,
+    conversion: str = "likert",
 ) -> pd.Series:
     """One respondent-level composite, built the way Pfänder builds its own.
 
@@ -183,14 +214,27 @@ def composite(
     would discard a quarter of the sample to protect a number that is graded
     unusable anyway.
     """
-    convert = to_slider_bin_midpoint if midpoint else to_slider
-    converted = pd.DataFrame(
-        {
-            item: convert(frame[item], options, scale, missing_codes)
-            for item in items
-            if item in frame.columns
-        }
-    )
+    if conversion == "native":
+        # ``midpoint`` has no meaning here: there is no binning to undo, so the
+        # rival conversion *is* the default one and the spread between them is 0.
+        converted = pd.DataFrame(
+            {
+                item: native(frame[item], 0.0, scale, missing_codes)
+                for item in items
+                if item in frame.columns
+            }
+        )
+    else:
+        if options is None:
+            raise ValueError("a likert conversion needs the number of options")
+        convert = to_slider_bin_midpoint if midpoint else to_slider
+        converted = pd.DataFrame(
+            {
+                item: convert(frame[item], options, scale, missing_codes)
+                for item in items
+                if item in frame.columns
+            }
+        )
     if converted.empty:
         return pd.Series(np.nan, index=frame.index)
     required = len(items) if min_answered is None else min_answered

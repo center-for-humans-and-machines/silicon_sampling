@@ -13,7 +13,7 @@ sampled answers can be compared against the published response data.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Mapping, Sequence
 
 # --------------------------------------------------------------------------- #
 # things the participant read
@@ -160,17 +160,46 @@ RESPONSE_TYPES = (Slider, Matrix, Choice, MultiChoice, Number, FreeText, NumberG
 
 
 @dataclass(frozen=True)
+class Gate:
+    """Display logic in a form a converter can evaluate, not merely print.
+
+    ``condition`` used to be the only record of a screen's display logic, and a
+    sentence is not something a session can act on: every consumer had to guess
+    the logic back out of English, and the one that tried missed seven screens.
+    A missed gate is silent and expensive — the WEPT decision chain rendered
+    unconditionally, so synthetic respondents produced accept-after-decline click
+    patterns that occur zero times in 8,253 real ones, and the effort outcome is
+    a count of those clicks.  So the logic is stated once, structurally, and the
+    prose is left to describe it rather than to carry it.
+    """
+
+    slot: str
+    answer: str
+
+    def matches(self, answers: Mapping[str, object]) -> bool:
+        """Did the respondent give the answer that opens this screen?"""
+        given = str(answers.get(self.slot, "")).strip().casefold()
+        return given == self.answer.strip().casefold()
+
+    def describe(self) -> str:
+        return f'shown only if the answer to {self.slot} was "{self.answer}"'
+
+
+@dataclass(frozen=True)
 class Screen:
     """One Qualtrics page.
 
     ``timer`` is the name of the page-timer variable in the published data, which
     is how the page boundaries were recovered; ``None`` means the page carried no
-    timer.  ``condition`` records display logic ("shown only if ...").
+    timer.  ``condition`` describes display logic in words, for a human reading
+    the template; ``gate`` states it in the form a session evaluates.  A screen
+    Qualtrics gated must carry a ``gate``, whatever its ``condition`` says.
     """
 
     elements: Sequence[object]
     timer: str | None = None
     condition: str | None = None
+    gate: Gate | None = None
 
 
 @dataclass(frozen=True)

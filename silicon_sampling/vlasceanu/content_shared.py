@@ -5,6 +5,21 @@ of that file is corrupt, so it was read visually).  Page boundaries come from th
 ``*_Page.Submit`` timer variables in ``data_raw.csv``; the timer name is recorded
 on each :class:`~silicon_sampling.vlasceanu.elements.Screen`.
 
+**Which item goes with which column is not the PDF's to say.**  Reading a matrix
+off a page recovers the set of statements but not reliably the order, and the
+order is the whole of the binding: the ``items`` pairs below name published data
+columns, so a permuted list silently files an answer under a column measuring
+something else.  Battery means are invariant to that permutation, which is why it
+survived a comparison against the published composites.  Every battery here is
+therefore ordered by the *choice codes* in ``data/ICPC/Materials/usa_3.qsf`` —
+none of the four matrix questions defines ``RecodeValues``,
+``ChoiceDataExportTags`` or ``VariableNaming``, so the export suffix simply *is*
+the choice code — cross-checked against ``codebook.xlsx`` and against the
+published per-item means.  Where the visual transcription and the ``.qsf``
+disagreed on the *wording* too, the ``.qsf`` wins: it is what participants read.
+``tests/test_icpc.py`` re-derives the binding from both authorities on every run,
+so a hand edit here that breaks it fails rather than quietly mis-scores.
+
 Note on the consent and debriefing screens: the master survey carries New York
 University's forms as a *specimen*.  The adaptation manual instructed every team
 to substitute their own institution's form, so the names, addresses and study
@@ -22,6 +37,7 @@ from .elements import (
     Choice,
     Echo,
     FreeText,
+    Gate,
     Image,
     Matrix,
     MultiChoice,
@@ -204,16 +220,16 @@ BELIEF = Block(
                     items=[
                         (
                             "Belief.in.CC_1",
-                            "Taking action to fight climate change is necessary to "
-                            "avoid a global catastrophe.",
-                        ),
-                        (
-                            "Belief.in.CC_2",
                             "Human activities are causing climate change.",
                         ),
                         (
-                            "Belief.in.CC_4",
+                            "Belief.in.CC_2",
                             "Climate change poses a serious threat to humanity.",
+                        ),
+                        (
+                            "Belief.in.CC_4",
+                            "Taking action to fight climate change is necessary to "
+                            "avoid a global catastrophe.",
                         ),
                         ("Belief.in.CC_5", "Climate change is a global emergency."),
                     ],
@@ -249,33 +265,33 @@ POLICY = Block(
                     items=[
                         (
                             "CC_policy_1",
+                            "raising carbon taxes on gas/fossil fuels/coal",
+                        ),
+                        (
+                            "CC_policy_2",
                             "significantly expanding infrastructure for public transportation",
                         ),
-                        ("CC_policy_2", "protecting forested and land areas"),
                         (
                             "CC_policy_3",
                             "increasing the number of charging stations for electric vehicles",
                         ),
-                        ("CC_policy_5", "investing more in green jobs and businesses"),
+                        (
+                            "CC_policy_5",
+                            "increasing the use of sustainable energy such as wind and solar energy",
+                        ),
                         (
                             "CC_policy_6",
                             "increasing taxes on airline companies to offset carbon emissions",
                         ),
-                        (
-                            "CC_policy_7",
-                            "increasing taxes on carbon intense foods (for example meat, and dairy)",
-                        ),
-                        (
-                            "CC_policy_8",
-                            "raising carbon taxes on gas/fossil fuels/coal",
-                        ),
+                        ("CC_policy_7", "protecting forested and land areas"),
+                        ("CC_policy_8", "investing more in green jobs and businesses"),
                         (
                             "CC_policy_9",
-                            "increasing the use of sustainable energy such as wind and solar energy",
+                            "introducing laws to keep waterways and oceans clean",
                         ),
                         (
                             "CC_policy_10",
-                            "introducing laws to keep waterways and oceans clean",
+                            "increasing taxes on carbon intense foods (for example meat, and dairy)",
                         ),
                     ],
                 ),
@@ -318,6 +334,10 @@ def sharing_block(cond_code: int) -> Block:
             ),
             Screen(
                 timer="share_timer2",
+                condition=(
+                    "shown only to respondents who said they were willing to share"
+                ),
+                gate=Gate("Share", "Yes, I am willing to share this information."),
                 elements=[
                     Text(
                         "Please select the platform you posted it on (select all that apply):"
@@ -445,6 +465,7 @@ def _wept_pages() -> list[Screen]:
                 condition=(
                     None if i == 1 else f"reached only if page {i - 1} was accepted"
                 ),
+                gate=None if i == 1 else Gate(f"WEPT{i - 1}confirm", "yes"),
                 elements=[
                     Text(_WEPT_OFFER.get(i, _WEPT_OFFER_DEFAULT)),
                     _tree_pictogram(i),
@@ -458,6 +479,7 @@ def _wept_pages() -> list[Screen]:
             Screen(
                 timer=grid_timers[i - 1],
                 condition=f'shown only if the answer to WEPT{i}confirm was "yes"',
+                gate=Gate(f"WEPT{i}confirm", "yes"),
                 elements=[
                     Text(_WEPT_TASK_PROMPT),
                     NumberGrid(
@@ -638,22 +660,22 @@ CONTROL_EXTRA_IVS = Block(
                     items=[
                         (
                             "Enviro_ID_1",
-                            "are you pleased to be someone who cares about the natural "
+                            "do you see yourself as someone who cares about the natural "
                             "environment",
                         ),
                         (
                             "Enviro_ID_2",
+                            "are you pleased to be someone who cares about the natural "
+                            "environment",
+                        ),
+                        (
+                            "Enviro_ID_3",
                             "do you feel strong ties with others who care about the "
                             "natural environment",
                         ),
                         (
-                            "Enviro_ID_3",
-                            "do you identify with others who someone who care about the "
-                            "natural environment",
-                        ),
-                        (
                             "Enviro_ID_4",
-                            "do you see yourself as someone who cares about the natural "
+                            "do you identify with others who care about the natural "
                             "environment",
                         ),
                     ],
@@ -674,49 +696,49 @@ CONTROL_EXTRA_IVS = Block(
                     items=[
                         (
                             "Enviro_motiv_1",
-                            "Being pro-environmental is important to my self-concept.",
-                        ),
-                        (
-                            "Enviro_motiv_11",
-                            "I attempt to behave pro-environmentally because it is "
-                            "personally important to me.",
-                        ),
-                        (
-                            "Enviro_motiv_12",
-                            "Because of my personal values, I believe that acting "
-                            "anti-environmental is wrong.",
-                        ),
-                        (
-                            "Enviro_motiv_13",
-                            "According to my personal values, acting non-environmental is OK.",
-                        ),
-                        (
-                            "Enviro_motiv_14",
                             "Because of today's politically correct standards, I try to "
                             "appear pro-environmental.",
                         ),
                         (
-                            "Enviro_motiv_15",
-                            "I am personally motivated by my beliefs to be pro-environmental.",
-                        ),
-                        (
-                            "Enviro_motiv_16",
-                            "If I acted anti-environmental, I would be concerned that "
-                            "others would be angry with me.",
-                        ),
-                        (
-                            "Enviro_motiv_17",
-                            "I attempt to appear pro-environmental in order to avoid "
-                            "disapproval from others.",
-                        ),
-                        (
-                            "Enviro_motiv_18",
+                            "Enviro_motiv_11",
                             "I try to hide my negative thoughts about pro-environmental "
                             "behavior in order to avoid negative reactions from others.",
                         ),
                         (
-                            "Enviro_motiv_20",
+                            "Enviro_motiv_12",
+                            "If I acted anti-environmental, I would be concerned that "
+                            "others would be angry with me.",
+                        ),
+                        (
+                            "Enviro_motiv_13",
+                            "I attempt to appear pro-environmental in order to avoid "
+                            "disapproval from others.",
+                        ),
+                        (
+                            "Enviro_motiv_14",
                             "I try to act pro-environmental because of pressure from others.",
+                        ),
+                        (
+                            "Enviro_motiv_15",
+                            "I attempt to behave pro-environmentally because it is "
+                            "personally important to me.",
+                        ),
+                        (
+                            "Enviro_motiv_16",
+                            "According to my personal values, acting non-environmental is OK.",
+                        ),
+                        (
+                            "Enviro_motiv_17",
+                            "I am personally motivated by my beliefs to be pro-environmental.",
+                        ),
+                        (
+                            "Enviro_motiv_18",
+                            "Because of my personal values, I believe that acting "
+                            "anti-environmental is wrong.",
+                        ),
+                        (
+                            "Enviro_motiv_20",
+                            "Being pro-environmental is important to my self-concept.",
                         ),
                     ],
                 ),
@@ -884,11 +906,11 @@ def demographics_block(profile: CountryProfile) -> Block:
                         extra="Prefer not to respond",
                         randomised=True,
                         items=[
-                            ("Politics2_1", "For economic issues (e.g., taxes)"),
                             (
-                                "Politics2_9",
+                                "Politics2_1",
                                 "For social issues (e.g., health care, education, etc.)",
                             ),
+                            ("Politics2_9", "For economic issues (e.g., taxes)"),
                         ],
                     ),
                 ],

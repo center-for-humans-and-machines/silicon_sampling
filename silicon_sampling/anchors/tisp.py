@@ -50,6 +50,10 @@ CODEBOOK = ROOT / "data" / "calibration" / "codebooks" / "cologna_etal2025_qs.do
 SOURCE = "TISP"
 COUNTRY = "USA"
 WEIGHT = "WEIGHT_CNTRY"
+#: Post-stratified: ``WEIGHT_CNTRY`` reweights the respondents to population
+#: margins, so a level from here estimates a population level rather than a
+#: sample's.  Read by :mod:`silicon_sampling.anchors.levels` as a tie-break.
+POST_STRATIFIED = True
 #: What the report has to state alongside any number from here.
 PROVENANCE = "TISP (Cologna et al. 2025), US sample, fielded 2023-02-07 to 2023-03-08"
 

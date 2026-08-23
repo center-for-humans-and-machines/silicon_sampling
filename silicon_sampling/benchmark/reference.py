@@ -21,11 +21,24 @@ from ..analysis.ols import benjamini_hochberg, design_matrix, ols
 
 
 def half_split(
-    frame: pd.DataFrame, seed: int = 42
+    frame: pd.DataFrame, seed: int = 42, exact: bool = False
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split respondents into the reference half and the replication half."""
+    """Split respondents into the reference half and the replication half.
+
+    The default is a coin flip per respondent, which lands near but not exactly on
+    half (and is the split every recorded number in this repository was computed
+    under, so it stays the default).  ``exact=True`` draws ``floor(n/2)``
+    respondents without replacement, which is what the benchmark's own pipeline
+    does — it matters only for how much sampling noise the replication reference
+    carries, never for any estimator.
+    """
     rng = np.random.default_rng(seed)
-    first = rng.random(len(frame)) < 0.5
+    if exact:
+        chosen = rng.choice(len(frame), size=len(frame) // 2, replace=False)
+        first = np.zeros(len(frame), dtype=bool)
+        first[chosen] = True
+    else:
+        first = rng.random(len(frame)) < 0.5
     return frame.loc[first].copy(), frame.loc[~first].copy()
 
 

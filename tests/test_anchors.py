@@ -26,6 +26,7 @@ from silicon_sampling.pfander.outcomes import (
     MEANS,
     MODERATORS,
     OUTCOMES,
+    REQUIRED_ITEMS,
     SUBSCALES,
 )
 
@@ -175,18 +176,35 @@ def test_every_scored_outcome_is_either_crosswalked_or_explained():
 
 
 def test_crosswalk_items_are_real_pfander_items():
+    """Every crosswalk row must name an item the Pfänder instrument actually asks.
+
+    A crosswalk row may name a Pfänder quantity by either of the two names it
+    legitimately has — the instrument's item id (``trust_competent_1``) or the
+    submission's column (``trust_competence_1``) — and may also name a scored
+    outcome directly (``behavior_mean``).  The allowlist therefore has to be the
+    union of all three vocabularies.  Built from ``DIRECT``/``MEANS``/``SUBSCALES``
+    keys alone it rejected correct rows: ``newsletter`` is a real instrument item
+    recoded into ``newsletter_signup`` and appears in none of them, and the twelve
+    trust rows are named by submission column rather than by item id.
+    """
     known = (
-        set(DIRECT)
+        set(REQUIRED_ITEMS)
+        | set(DIRECT)
+        | set(DIRECT.values())
+        | set(OUTCOMES)
+        | set(MEANS)
         | {item for items in MEANS.values() for item in items}
+        | set(SUBSCALES)
         | {item for items in SUBSCALES.values() for item in items}
-        | {f"trust_{facet}_{i}" for facet in SUBSCALES for i in (1, 2, 3)}
+        | {
+            f"trust_{facet.split('_')[-1]}_{index}"
+            for facet in SUBSCALES
+            for index in (1, 2, 3)
+        }
     )
-    known |= {name.replace("trust_", "trust_") for name in known}
     for entry in cw.CROSSWALK:
         stem = entry.pfander_item.split(" ")[0]
-        assert stem in known or stem.startswith(
-            ("trust_", "policy_", "funding_", "concern_", "individual_", "belief_")
-        ), entry.pfander_item
+        assert stem in known, entry.pfander_item
 
 
 def test_a_group_is_only_as_good_as_its_worst_item():

@@ -12,9 +12,32 @@ is the condition x moderator interaction.
 answers from a stereotype produces a sample where knowing someone's party tells
 you their answer almost exactly; real people are far noisier than that.  This is
 the benchmark's stereotyping diagnostic.
+
+These are *descriptive* views of one sample, and two of them are deliberately
+not the benchmark's scored estimands, which live in
+:mod:`silicon_sampling.benchmark.scored`.  :func:`subgroup_effects` gives the ATE
+*within* each moderator level, which reads well in a table but is not what the
+benchmark scores — that is the condition x moderator interaction coefficient, a
+difference of two such ATEs, with its own standard error.  :func:`parity_gap`
+here is the spread of group means inside one sample; the benchmark's demographic
+parity gap is the spread of *human-vs-prediction errors* across groups, and a
+sample can look flat on one while failing badly on the other.  Keeping both is
+the point: the descriptive view explains a scored number once it goes wrong.
+
+The two regression views use **HC2** errors, which is what the Voelkel study and
+the benchmark preregistration specify and what matters here: the control arm is
+much larger than any single treatment arm, and HC2's leverage correction is
+exactly the adjustment uneven cell sizes call for.  It is a keyword rather than a
+constant because the choice moves published numbers — switching the default from
+HC1 moved every ``moderation_test`` chi-square on the 18,000-row Pfänder sample
+(median 0.49, up to 8.14, so the p-values and their ordering move with it), while
+leaving :func:`subgroup_effects`' point estimates untouched, as any covariance
+choice must.  Anything that reproduces an older table has to say so.
 """
 
 from __future__ import annotations
+
+from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -67,19 +90,28 @@ def moderation_test(
     outcome: str,
     condition_col: str = "condition",
     control: str = "control",
+    levels: Sequence[str] | None = None,
+    robust: str = "HC2",
 ) -> dict:
-    """Saturated ``outcome ~ condition * moderator``; joint test on the interaction."""
+    """Saturated ``outcome ~ condition * moderator``; joint test on the interaction.
+
+    ``robust`` reaches the Wald statistic through the covariance matrix, so it is
+    the whole difference between one recorded chi-square and another.
+    """
     data = frame[[condition_col, moderator, outcome]].dropna()
     y = data[outcome].to_numpy(dtype=float)
     cond_X, cond_names = design_matrix(
         {condition_col: data[condition_col].tolist()},
         reference={condition_col: control},
     )
-    mod_X, mod_names = design_matrix({moderator: data[moderator].astype(str).tolist()})
+    mod_X, mod_names = design_matrix(
+        {moderator: data[moderator].astype(str).tolist()},
+        levels={moderator: levels} if levels else None,
+    )
     inter_X, inter_names = interaction(cond_X, cond_names, mod_X, mod_names)
     X = np.hstack([cond_X, mod_X[:, 1:], inter_X])
     names = cond_names + mod_names[1:] + inter_names
-    fit = ols(X, y, names)
+    fit = ols(X, y, names, robust=robust)
     test = wald(fit, inter_names)
     return {
         "moderator": moderator,
@@ -114,8 +146,13 @@ def subgroup_effects(
     outcome: str,
     condition_col: str = "condition",
     control: str = "control",
+    robust: str = "HC2",
 ) -> pd.DataFrame:
-    """The ATE of each intervention within each moderator level."""
+    """The ATE of each intervention within each moderator level.
+
+    ``robust`` changes the intervals only: the estimates are cell-mean differences
+    and no covariance choice can move them.
+    """
     rows = []
     for level, group in frame.groupby(moderator, sort=True):
         data = group[[condition_col, outcome]].dropna()
@@ -129,7 +166,7 @@ def subgroup_effects(
             {condition_col: data[condition_col].tolist()},
             reference={condition_col: control},
         )
-        fit = ols(X, y, names)
+        fit = ols(X, y, names, robust=robust)
         for name in names:
             if name == "(Intercept)":
                 continue

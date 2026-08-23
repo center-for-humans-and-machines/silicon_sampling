@@ -143,6 +143,18 @@ def test_half_split_is_deterministic_and_disjoint():
     assert len(a1) + len(b1) == 1000
 
 
+def test_half_split_can_draw_an_exact_half():
+    frame = pd.DataFrame({"id": range(101)})
+    left, right = half_split(frame, exact=True)
+    # floor(n/2) in the reference half, the remainder in the replication half —
+    # the benchmark's own sample(ids, floor(n/2)) draw.
+    assert len(left) == 50 and len(right) == 51
+    assert set(left.index) | set(right.index) == set(frame.index)
+    # The default is a coin flip, so it lands near half but not on it.
+    default_left, _ = half_split(frame)
+    assert len(default_left) != 50
+
+
 def test_treatment_effects_recover_a_planted_effect_and_pair_up():
     rng = np.random.default_rng(5)
     rows = []

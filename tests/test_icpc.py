@@ -1,0 +1,716 @@
+"""Tests for the ICPC study package.
+
+Five things are worth testing here and they are all cheap.  The instrument has to
+*drive* — every echo resolvable before it is shown, no marker reaching a model,
+every slot accepting its own legal answers.  The slot ids have to name real
+columns in the published export, because that is what makes a sampled answer
+comparable.  And the four outcomes have to reproduce the second publication's
+cleaned columns exactly, because the whole calibration rests on them.
+
+The other two were added after an audit found the first three insufficient, and
+both are about the *binding* between a transcript and the published data rather
+than about whether anything runs:
+
+* **Which item goes with which column.**  Naming a real column is not the
+  requirement; naming the *right* one is.  A battery transcribed in the wrong
+  order names 24 real columns and files every answer under a neighbour, and no
+  battery-level check can see it because a mean is invariant to permuting its
+  items.  So the binding is re-derived here from the ``.qsf``, cross-checked
+  against ``codebook.xlsx``, and sanity-checked against the published per-item
+  means, for every battery rather than for a spot check.
+* **Which screens a respondent is shown.**  Seventeen questions carry Qualtrics
+  ``DisplayLogic``, and a transcript that renders them unconditionally produces
+  answer patterns that occur zero times in 8,253 real respondents — including in
+  the effort outcome, which is a count of exactly those answers.  So what the
+  transcript gates is checked against what the ``.qsf`` gates, and the click
+  patterns synthetic respondents actually produce are checked for the monotonicity
+  the survey enforced.
+
+The data-dependent tests skip rather than fail when the 168 MB export is absent,
+so the package stays testable in a checkout without ``data/``.
+"""
+
+from __future__ import annotations
+
+import csv
+import json
+import re
+
+import pandas as pd
+import pytest
+
+from silicon_sampling.icpc import convert
+from silicon_sampling.icpc import instrument as inst
+from silicon_sampling.icpc import outcomes as oc
+from silicon_sampling.icpc import paths, profiles
+from silicon_sampling.icpc import templates as tpl
+from silicon_sampling.icpc import validate
+from silicon_sampling.icpc.images import IMAGE_ALT
+from silicon_sampling.survey.render import MARKER_RE, render_template, slot_manifest
+
+requires_qsf = pytest.mark.skipif(
+    not paths.QSF.exists(), reason="instrument .qsf not vendored"
+)
+requires_data = pytest.mark.skipif(
+    not paths.DOELL_CSV.exists(), reason="published export not present"
+)
+requires_codebook = pytest.mark.skipif(
+    not paths.CODEBOOK.exists(), reason="published codebook not vendored"
+)
+requires_stimuli = pytest.mark.skipif(
+    not (paths.STIMULI / "index.json").exists(), reason="stimuli not vendored"
+)
+
+
+# --------------------------------------------------------------------------- #
+# the arm table
+# --------------------------------------------------------------------------- #
+
+
+def test_twelve_arms_with_unique_codes_and_slugs():
+    assert len(inst.ARMS) == 12
+    assert [arm.code for arm in inst.ARMS] == list(range(1, 13))
+    assert len({arm.key for arm in inst.ARMS}) == 12
+    assert len({arm.slug for arm in inst.ARMS}) == 12
+    assert inst.CONDITIONS[0] == inst.CONTROL
+
+
+def test_the_two_renamed_arms_carry_both_names():
+    assert inst.BY_KEY["Letter2Future"].alias == "LetterFutureGen"
+    assert inst.BY_KEY["Identity-Social-Norms-Intervention"].alias == "WorkTogetherNorm"
+    # Every other arm is named the same in both publications.
+    same = [arm for arm in inst.ARMS if arm.key == arm.alias]
+    assert len(same) == 10
+
+
+# --------------------------------------------------------------------------- #
+# the instrument
+# --------------------------------------------------------------------------- #
+
+
+@requires_qsf
+def test_every_arm_assembles_and_renders():
+    for arm in inst.ARMS:
+        converted = inst.assemble(arm)
+        text = render_template(inst.header("p00001", arm), converted.elements)
+        assert text.count("\nResponse:") == len(slot_manifest(converted.elements))
+        assert len(text) > 20_000
+
+
+@requires_qsf
+def test_control_reads_its_filler_before_the_shared_definition():
+    keys = [
+        block.key
+        for block in inst.assemble("Control").elements
+        if hasattr(block, "key")
+    ]
+    filler = inst._key(inst.BY_KEY["Control"].block)
+    assert keys.index(filler) < keys.index("intro")
+
+
+@requires_qsf
+def test_only_the_control_arm_gets_the_extra_measure_blocks():
+    control = {
+        block.key
+        for block in inst.assemble("Control").elements
+        if hasattr(block, "key")
+    }
+    treated = {
+        block.key
+        for block in inst.assemble("SciConsens").elements
+        if hasattr(block, "key")
+    }
+    assert {"control_ivs", "terms_probing"} <= control
+    assert not {"control_ivs", "terms_probing"} & treated
+
+
+@requires_qsf
+def test_every_response_position_has_a_question_stem():
+    # Three lines per response position: a numbered stem (which may itself run to
+    # several lines), an indented statement of the legal answers, then Response:.
+    for arm in inst.ARMS:
+        text = render_template(inst.header("p", arm), inst.assemble(arm).elements)
+        lines = text.splitlines()
+        responses = [i for i, line in enumerate(lines) if line.startswith("Response:")]
+        assert responses
+        for index in responses:
+            assert lines[index - 1].startswith("      "), lines[index - 1]
+        numbered = [line for line in lines if re.match(r"Q\d+\. ", line)]
+        assert len(numbered) == len(responses), arm.key
+
+
+@requires_qsf
+def test_slot_ids_are_unique_within_an_arm():
+    for arm in inst.ARMS:
+        slots = slot_manifest(inst.assemble(arm).elements)
+        ids = [slot["id"] for slot in slots]
+        assert len(ids) == len(set(ids)), arm.key
+
+
+@requires_qsf
+def test_echo_targets_are_answered_before_they_are_displayed():
+    # `<<=id>>` is matched by word characters only, so any echo naming an id with
+    # an R-mangled dot in it would survive rendering and never resolve.
+    for arm in inst.ARMS:
+        text = render_template(inst.header("p", arm), inst.assemble(arm).elements)
+        for marker in MARKER_RE.findall(text):
+            if marker.startswith("<<="):
+                assert marker[3:-2].replace("_", "").isalnum(), marker
+
+
+@requires_qsf
+def test_every_stimulus_image_is_described():
+    state = inst.loaded()
+    for question in state.survey.questions.values():
+        for key in _image_keys(question.raw_text):
+            assert key in IMAGE_ALT, key
+
+
+def _image_keys(raw: str) -> list[str]:
+    keys = []
+    for tag in re.findall(r"<img\b[^>]*>", raw or "", re.I):
+        source = re.search(r'src="([^"]+)"', tag)
+        url = source.group(1) if source else ""
+        found = re.search(r"IM=(IM_\w+)", url)
+        keys.append(found.group(1) if found else url)
+    return keys
+
+
+@requires_qsf
+def test_modality_audit_keeps_all_twelve_arms():
+    rows = inst.modality_rows()
+    assert len(rows) == 12
+    assert {row["decision"] for row in rows} == {"keep"}
+    # The claim the audit exists to support: nothing but static images.
+    for row in rows:
+        assert row["video"] == 0 and row["audio"] == 0
+        assert row["iframe"] == 0 and row["script"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# driving it
+# --------------------------------------------------------------------------- #
+
+
+@requires_qsf
+def test_every_arm_can_be_driven_to_the_end():
+    runs = validate.dry_run_all()
+    assert len(runs) == 12
+    for run in runs:
+        assert MARKER_RE.search(run.transcript) is None
+        # Not "asked more than n questions": how many a respondent is asked now
+        # depends on their own answers, because the gated screens really are
+        # gated.  What has to hold is that nothing a scored outcome is built from
+        # was skipped.
+        for item in oc.BELIEF_ITEMS + oc.POLICY_ITEMS + ("Share", "WEPT1confirm"):
+            assert item in run.answers, (run.condition, item)
+
+
+@requires_qsf
+def test_the_panel_record_can_be_switched_off():
+    with_panel = validate.dry_run(profiles.build(per_arm=1)[0], panel_header=True)
+    without = validate.dry_run(profiles.build(per_arm=1)[0], panel_header=False)
+    assert "PARTICIPANT PANEL RECORD" in with_panel.transcript
+    assert "PARTICIPANT PANEL RECORD" not in without.transcript
+
+
+# --------------------------------------------------------------------------- #
+# profiles
+# --------------------------------------------------------------------------- #
+
+
+def test_profiles_are_balanced_and_deterministic():
+    first = profiles.build(per_arm=20)
+    second = profiles.build(per_arm=20)
+    assert [p.profile_id for p in first] == [p.profile_id for p in second]
+    assert [p.condition for p in first] == [p.condition for p in second]
+    counts = profiles.sanity(first)["per_arm"]
+    assert set(counts.values()) == {20}
+
+
+def test_profile_round_trips_through_csv(tmp_path):
+    built = profiles.build(per_arm=3)
+    path = tmp_path / "profiles.csv"
+    profiles.write_csv(built, path)
+    back = profiles.read_csv(path)
+    assert [p.profile_id for p in back] == [p.profile_id for p in built]
+    assert back[0].prefilled == built[0].prefilled
+
+
+def test_prefilled_answers_cover_the_screened_items():
+    profile = profiles.build(per_arm=1)[0]
+    answers = profile.prefilled
+    assert answers["AttentionCheck_purp"] == "Purple"
+    assert answers["Attn_60"] == "sixty"
+    assert answers["WEPTdemo1_1"] == "67, 85"
+    assert answers["WEPTdemo2_1"] == "23, 81"
+    assert answers["cond"] == profile.cond
+
+
+def test_the_wept_demonstration_answers_are_actually_the_target_numbers():
+    from silicon_sampling.vlasceanu.content_shared import _WEPT_DEMO_ROWS
+
+    for row, expected in zip(_WEPT_DEMO_ROWS, ("67, 85", "23, 81")):
+        targets = [
+            number
+            for number in row
+            if (number // 10) % 2 == 0 and (number % 10) % 2 == 1
+        ]
+        assert ", ".join(str(number) for number in targets) == expected
+
+
+# --------------------------------------------------------------------------- #
+# outcomes
+# --------------------------------------------------------------------------- #
+
+
+def test_outcome_scales_are_the_published_ones():
+    assert oc.OUTCOMES == {
+        "belief": 100.0,
+        "policy": 100.0,
+        "sharing": 1.0,
+        "wept": 8.0,
+    }
+    assert len(oc.BELIEF_ITEMS) == 4
+    assert len(oc.POLICY_ITEMS) == 9
+    assert len(oc.WEPT_ITEMS) == 8
+
+
+def test_outcomes_are_computed_from_text_answers_too():
+    frame = pd.DataFrame(
+        {
+            "Belief.in.CC_1": [100, 0],
+            "Belief.in.CC_2": [80, 20],
+            "Belief.in.CC_4": [60, 40],
+            "Belief.in.CC_5": [40, 60],
+            "Share": [
+                "Yes, I am willing to share this information.",
+                "I do not use social media.",
+            ],
+            **{f"WEPT{i}confirm": ["yes", "no"] for i in range(1, 9)},
+        }
+    )
+    computed = oc.compute(frame)
+    assert computed["belief"].tolist() == [70.0, 30.0]
+    assert computed["sharing"].tolist()[0] == 1.0
+    assert pd.isna(computed["sharing"].tolist()[1])
+    assert computed["wept"].tolist() == [8.0, 0.0]
+
+
+@requires_data
+def test_slot_ids_map_onto_real_published_columns():
+    header = pd.read_csv(paths.DOELL_CSV, encoding="latin-1", nrows=1, low_memory=False)
+    columns = set(header.columns)
+    mapped = inst.data_columns()
+    assert len(mapped) > 140
+    missing = {slot: column for slot, column in mapped.items() if column not in columns}
+    assert missing == {}
+
+
+@requires_data
+def test_the_us_filter_selects_the_quota_subsample():
+    from silicon_sampling.icpc import score
+
+    frame = score.load_raw(columns=("ResponseId", "country", "condName", "teams"))
+    us = score.us_subsample(frame)
+    assert len(us) == 8253
+    assert set(us["teams"]) == {"usa_1", "usa_2", "usa_3"}
+    assert set(us["condName"]) == set(inst.CONDITIONS)
+
+
+@requires_data
+def test_outcomes_reproduce_the_cleaned_publication():
+    from silicon_sampling.icpc.score import verify_outcomes
+
+    table = verify_outcomes()
+    assert set(table["outcome"]) == set(oc.OUTCOMES)
+    assert table["matches"].all()
+    assert (table["max_abs_diff"] == 0).all()
+
+
+# --------------------------------------------------------------------------- #
+# rendered artefacts
+# --------------------------------------------------------------------------- #
+
+
+@requires_qsf
+def test_render_all_writes_the_expected_file_set(tmp_path):
+    manifest = tpl.render_all(out_dir=tmp_path)
+    assert len(manifest["arms"]) == 12
+    assert (tmp_path / "00_FORMAT.md").exists()
+    assert (tmp_path / "manifest.json").exists()
+    assert (tmp_path / "modality_audit.csv").exists()
+    assert len(list(tmp_path.glob("*.txt"))) == 12
+    written = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    for entry in written["arms"].values():
+        assert (tmp_path / entry["file"]).exists()
+        assert entry["n_slots"] == len(entry["slots"])
+        assert all(slot["data_column"] for slot in entry["slots"])
+    with (tmp_path / "modality_audit.csv").open(encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 12
+
+
+@requires_qsf
+def test_the_three_us_instruments_agree_up_to_two_spellings():
+    """usa_1/2/3 are the same survey; this pins down exactly how they differ."""
+    from silicon_sampling.icpc import convert
+
+    def stimuli(path):
+        return {
+            arm.key: re.sub(
+                r"\s+",
+                " ",
+                render_template(
+                    "H", convert.convert_qsf_block(arm.block, path=path).elements
+                ),
+            )
+            for arm in inst.ARMS
+            if arm.block
+        }
+
+    reference = stimuli(paths.QSF_ALL[-1])
+    for path in paths.QSF_ALL[:-1]:
+        other = stimuli(path)
+        assert set(other) == set(reference)
+        differing = {key for key in other if other[key] != reference[key]}
+        # usa_1 alone spells "gray", "labor" and "droughts" where the other two
+        # have "grey", "labour" and the master's typo "draughts"; usa_2 differs
+        # from usa_3 only in invisible characters, which the squeeze removes.
+        allowed = (
+            {"Control", "PsychDistance", "FutureSelfCont"}
+            if path.name == "usa_1.qsf"
+            else set()
+        )
+        assert differing == allowed, (path.name, differing)
+
+
+# --------------------------------------------------------------------------- #
+# the item-to-column binding
+# --------------------------------------------------------------------------- #
+
+
+def _bound_wording() -> dict[str, str]:
+    """Published column -> the statement the transcripts print beside it.
+
+    Read off the assembled arms rather than out of the source, so what is checked
+    is the artefact a sampler consumes.
+    """
+    bound: dict[str, str] = {}
+    for arm in inst.ARMS:
+        converted = inst.assemble(arm)
+        for slot in slot_manifest(converted.elements):
+            column = converted.data_columns.get(slot["id"], "")
+            if column:
+                bound[column] = slot["prompt"]
+    return bound
+
+
+def _squeeze(text: str) -> str:
+    return re.sub(r"[^a-z0-9 ]", "", re.sub(r"\s+", " ", text.strip().lower()))
+
+
+@requires_qsf
+def test_every_battery_item_is_bound_to_the_column_the_qsf_gives_it():
+    """The regression test for 24 items bound to a neighbouring column.
+
+    The batteries were transcribed visually from a PDF whose text layer is
+    corrupt, and the order came out permuted — so ``CC_policy_1`` asked about
+    public transport while the column holds support for a carbon tax.  Nothing
+    downstream could notice: the ids are real columns and the composites are
+    means.  This holds every battery item to the ``.qsf``, where the export suffix
+    *is* the choice code because none of these questions defines
+    ``RecodeValues``, ``ChoiceDataExportTags`` or ``VariableNaming``.
+    """
+    authority = convert.qsf_item_wording()
+    assert len(authority) > 40
+    bound = _bound_wording()
+    checked = 0
+    for column, wording in authority.items():
+        if column not in bound:
+            continue
+        checked += 1
+        assert _squeeze(bound[column]) == _squeeze(wording), column
+    assert checked > 40
+
+
+@requires_qsf
+@requires_codebook
+def test_every_battery_item_matches_the_published_codebook():
+    """The same binding against the second, independent authority.
+
+    ``codebook.xlsx`` was produced from the live survey rather than from the
+    ``.qsf``, so agreement with it rules out a misreading of the ``.qsf`` as
+    readily as it rules out a misreading of the PDF.
+    """
+    codebook = convert.codebook_item_wording()
+    bound = _bound_wording()
+    checked = 0
+    for column, wording in codebook.items():
+        if column not in bound:
+            continue
+        checked += 1
+        assert _squeeze(bound[column]) == _squeeze(wording), column
+    assert checked > 40
+
+
+#: Enviro_motiv splits into internally and externally motivated statements, and
+#: the US sample endorses the internal ones far more strongly.  Keyed off the
+#: *wording* so the classification follows whatever the binding claims; the
+#: reverse-keyed item ("acting non-environmental is OK") belongs to neither pole
+#: and is left out.
+_INTERNAL = ("personally", "my personal values", "my self-concept")
+_EXTERNAL = ("others", "politically correct")
+
+
+@requires_qsf
+@requires_data
+def test_published_item_means_agree_with_the_wording_each_column_is_bound_to():
+    """The published numbers, used as a third authority on the binding.
+
+    This is the check the delivered verification lacked.  Comparing battery means
+    cannot see a permutation; comparing *items* can, because an item's mean is a
+    fact about its content.  Two facts suffice, and the permuted binding violated
+    both: the least-supported of the nine policies is a tax on meat and dairy and
+    the best-supported is protecting forests, and every internally motivated
+    environmental-motivation item outscores every externally motivated one.
+    """
+    columns = list(oc.POLICY_ITEMS) + [
+        f"Enviro_motiv_{i}" for i in (1, 11, 12, 13, 14, 15, 16, 17, 18, 20)
+    ]
+    frame = pd.read_csv(
+        paths.DOELL_CSV,
+        encoding="latin-1",
+        low_memory=False,
+        usecols=["country"] + columns,
+    )
+    us = frame[frame["country"] == "usa"]
+    means = {name: pd.to_numeric(us[name], errors="coerce").mean() for name in columns}
+    bound = _bound_wording()
+
+    policy = {name: means[name] for name in oc.POLICY_ITEMS}
+    assert "meat" in bound[min(policy, key=policy.get)]
+    assert "forested" in bound[max(policy, key=policy.get)]
+
+    internal, external = [], []
+    for name in columns:
+        if not name.startswith("Enviro_motiv"):
+            continue
+        wording = bound[name].lower()
+        if " ok" in wording:
+            continue
+        if any(mark in wording for mark in _INTERNAL):
+            internal.append(means[name])
+        elif any(mark in wording for mark in _EXTERNAL):
+            external.append(means[name])
+    assert len(internal) == 4 and len(external) == 5
+    assert min(internal) > max(external)
+
+
+@requires_data
+def test_the_per_item_check_covers_every_belief_and_policy_item():
+    from silicon_sampling.icpc.score import verify_items
+
+    table = verify_items()
+    assert len(table) == len(oc.BELIEF_ITEMS) + len(oc.POLICY_ITEMS)
+    assert set(table["item"]) == set(oc.BELIEF_ITEMS + oc.POLICY_ITEMS)
+    assert table["matches"].all()
+    assert (table["max_abs_diff"] == 0).all()
+
+
+# --------------------------------------------------------------------------- #
+# display logic
+# --------------------------------------------------------------------------- #
+
+
+@requires_qsf
+def test_the_transcript_gates_exactly_what_qualtrics_gated():
+    """The regression test for seventeen ungated conditional questions.
+
+    The display logic used to live only in an English sentence on the screen, and
+    the one consumer that tried to read it back out matched seven of the fifteen
+    WEPT screens and neither of the sharing ones.  A missed gate fails silently:
+    the screen simply renders for everyone.  So the set of gated response
+    positions is compared against ``DisplayLogic`` in the ``.qsf`` itself.
+    """
+    stems = convert.qsf_gated_stems()
+    assert len(stems) == 16
+    for arm in inst.ARMS:
+        converted = inst.assemble(arm)
+        for slot in slot_manifest(converted.elements):
+            column = converted.data_columns.get(slot["id"], "")
+            expected = convert.is_gated(column, stems)
+            assert expected == ("shown_if" in slot), (arm.key, slot["id"])
+
+
+@requires_qsf
+def test_no_synthetic_respondent_produces_a_click_pattern_the_survey_forbids():
+    """Sixty respondents, none of them impossible.
+
+    The WEPT confirmations are a chain — page n is only offered to someone who
+    accepted page n-1 — and the effort outcome is their sum, so an ungated chain
+    does not merely add noise, it inflates the one outcome whose treatment effects
+    run negative.  In the 8,253 US respondents there is not a single answer after
+    a decline.
+    """
+    for profile in profiles.build(per_arm=5):
+        run = validate.dry_run(profile)
+        asked = [i for i in range(1, 9) if f"WEPT{i}confirm" in run.answers]
+        assert asked == list(range(1, len(asked) + 1)), profile.profile_id
+        declined = [i for i in asked if run.answers[f"WEPT{i}confirm"] == "no"]
+        assert declined in ([], [asked[-1]]), profile.profile_id
+        grids = [i for i in range(1, 9) if f"WEPT{i}nums_1" in run.answers]
+        assert grids == [i for i in asked if run.answers[f"WEPT{i}confirm"] == "yes"]
+
+
+@requires_qsf
+def test_the_platform_question_is_only_asked_of_willing_sharers():
+    """Nobody is asked which platform they posted on after refusing to post."""
+    willing = "Yes, I am willing to share this information."
+    seen_both = set()
+    for profile in profiles.build(per_arm=5):
+        run = validate.dry_run(profile)
+        answered = "Share2" in run.answers
+        assert answered == (run.answers.get("Share") == willing), profile.profile_id
+        seen_both.add(answered)
+    # Both branches have to occur, or the assertion above proves nothing.
+    assert seen_both == {True, False}
+
+
+# --------------------------------------------------------------------------- #
+# what the verification reports
+# --------------------------------------------------------------------------- #
+
+
+def _toy_published(wept):
+    """Two respondents, in the shape the cleaned extract has."""
+    return pd.DataFrame(
+        {
+            "ResponseId": ["a", "b"],
+            **{f"Belief{i}": [50, 50] for i in range(1, 5)},
+            **{f"Policy{i}": [50, 50] for i in range(1, 10)},
+            "SHAREcc": [1, 1],
+            "WEPTcc": wept,
+        }
+    )
+
+
+def _toy_raw(confirms):
+    return pd.DataFrame(
+        {
+            "ResponseId": ["a", "b"],
+            **{name: [50, 50] for name in oc.BELIEF_ITEMS + oc.POLICY_ITEMS},
+            "Share": [1, 1],
+            **confirms,
+        }
+    )
+
+
+def test_the_outcome_check_counts_rows_only_one_side_has():
+    """A row the study scored and we did not must not vanish from the comparison.
+
+    Reporting only the intersection is how 18 respondents published as
+    ``WEPTcc = 0`` hid behind a maximum absolute difference of zero and a
+    ``matches`` of ``True``.
+    """
+    published = _toy_published([8, 0])
+    scored = oc.verify_against_published(
+        _toy_raw({f"WEPT{i}confirm": [1, None] for i in range(1, 9)}), published
+    ).set_index("outcome")
+    assert scored.loc["wept", "n_compared"] == 2
+    assert scored.loc["wept", "only_published"] == 0
+    assert bool(scored.loc["wept", "matches"])
+
+    # A frame with no WEPT column at all: ours is missing for both rows, the
+    # study scored both, and that has to be visible rather than masked away.
+    hidden = oc.verify_against_published(_toy_raw({}), published).set_index("outcome")
+    assert hidden.loc["wept", "n_compared"] == 0
+    assert hidden.loc["wept", "only_published"] == 2
+    assert not bool(hidden.loc["wept", "matches"])
+
+
+def test_a_missing_wept_confirmation_counts_as_a_refusal():
+    """What the study does with a chain that stopped early, and with no chain."""
+    stopped = oc.compute(
+        pd.DataFrame(
+            {
+                "WEPT1confirm": ["yes"],
+                "WEPT2confirm": ["yes"],
+                "WEPT3confirm": ["no"],
+            }
+        )
+    )
+    assert stopped["wept"].tolist() == [2.0]
+    # Never reached the block: every flag present and missing.  The study
+    # publishes 0 for these 18 respondents, so summing with ``min_count=1`` and
+    # calling it missing disagreed with the publication and hid inside the
+    # intersection of the comparison.
+    never_reached = oc.compute(pd.DataFrame({name: [None] for name in oc.WEPT_ITEMS}))
+    assert never_reached["wept"].tolist() == [0.0]
+    # No such column at all, though, is a frame that says nothing about effort.
+    absent = oc.compute(pd.DataFrame({"Share": ["I do not use social media."]}))
+    assert pd.isna(absent["wept"]).all()
+
+
+@requires_data
+def test_the_polarity_the_module_docstring_claims_is_the_one_in_the_data():
+    """The docstring is a delivered claim; hold it to the number it states."""
+    from silicon_sampling.icpc import score
+
+    effects = score.effects(score.load_humans())
+    wept = effects[effects["outcome"] == "wept"]
+    assert int((wept["estimate"] < 0).sum()) == 9
+    assert set(wept.loc[wept["estimate"] > 0, "condition"]) == {
+        "BindingMoral",
+        "DynamicNorm",
+    }
+    assert "nine of them" in score.__doc__
+    assert "eleven of eleven" not in score.__doc__
+
+
+# --------------------------------------------------------------------------- #
+# vendored stimuli
+# --------------------------------------------------------------------------- #
+
+
+@requires_stimuli
+def test_the_stimulus_index_names_a_file_that_exists_for_everything_it_kept():
+    """The index is the only record of which pictures survived; it has to be true.
+
+    It used to list six CDN failures and none of the five recoveries, so a reader
+    concluded six images were lost when only one is.
+    """
+    index = json.loads((paths.STIMULI / "index.json").read_text(encoding="utf-8"))
+    assert isinstance(index, dict), "the index has to state its own counts"
+    on_disk = {
+        path.name for path in paths.STIMULI.iterdir() if path.name != "index.json"
+    }
+    named = set()
+    counts = {"ok": 0, "recovered": 0, "lost": 0}
+    for entry in index["images"]:
+        counts[entry["status"]] += 1
+        if entry["status"] == "lost":
+            assert entry["file"] is None
+            continue
+        assert entry["file"] in on_disk, entry
+        named.add(entry["file"])
+    assert named == on_disk
+    assert counts == {"ok": 51, "recovered": 5, "lost": 1}
+    assert index["counts"] == {
+        "referenced": sum(counts.values()),
+        **counts,
+        "files_on_disk": len(on_disk),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# profiles, continued
+# --------------------------------------------------------------------------- #
+
+
+def test_the_ideology_weights_are_ten_point_bins_not_deciles():
+    """Deciles hold a tenth each; these hold between 5% and 22%."""
+    assert not hasattr(profiles, "IDEOLOGY_DECILES")
+    assert len(profiles.IDEOLOGY_BINS) == 10
+    assert abs(sum(profiles.IDEOLOGY_BINS) - 1) < 1e-3
+    assert max(profiles.IDEOLOGY_BINS) > 0.2

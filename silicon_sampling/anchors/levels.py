@@ -24,21 +24,40 @@ not a weak anchor, it is a harmful one.  Hence:
 ## Choosing between candidate groups
 
 Two groups can offer the same outcome: TISP has both the battery and a rival
-single item for ``trust_post``, and both sources reach for
-``policy_specific_mean``.  The rule is grade first, then coverage (how many of the
-outcome's Pfänder items the group carries), then effective sample size.  Grade
-first because a better-worded item beats a bigger sample by a wide margin here —
-the sampling SEs are near 0.5 points and the wording differences are worth several.
+single item for ``trust_post``, and all three sources reach for one composite or
+another.  The rule is grade, then coverage (how many of the outcome's Pfänder items
+the group carries), then whether the source is post-stratified, then effective
+sample size.
+
+Grade first because a better-worded item beats a bigger sample by a wide margin
+here — the sampling SEs are near 0.5 points and the wording differences are worth
+several.  Post-stratification ahead of sample size because it is the difference
+between estimating a population level and estimating a panel's, and a bigger
+unweighted sample does not fix that; it is placed *after* grade and coverage
+because it says nothing about whether the item asks Pfänder's question.
+
+The rule does trade wording against representativeness, and ``behavior_mean`` is
+where it shows: Goldwert's ``conversation`` is a 0-100 commitment-to-talk slider,
+much the closer match to Pfänder's item, while CCAM's ``discuss_GW`` is a
+four-point past-frequency question from a post-stratified panel.  The rule picks
+CCAM.  It hardly matters, because the two disagree by 16.6 points — five times
+break-even — so neither is offered and the outcome is simply not anchorable.
 
 ## What ends up anchored
 
 Three of thirteen outcomes, all from TISP, all at grade ``near``:
 ``trust_multidimensional``, ``trust_post`` and ``policy_role_mean``.  The other
 ten are either graded ``construct-only``/``unusable`` in the crosswalk or have no
-candidate item at all.  That is a thin result and it is the correct one: four of
-the ten are behavioural or institution-specific items that no public survey
-carries, and the climate-policy items that *look* anchorable disagree across the
-two sources by 6.5 and 7.0 points, which is above break-even.
+candidate item at all.  That is a thin result and it is the correct one: the
+climate-policy items that *look* anchorable disagree across two sources by 6.5 and
+7.0 points, and the behaviour-intention items by 16.6, all above break-even.
+
+Goldwert closed the two gaps where nothing had even been *found* — the donation and
+the newsletter signup, both on Pfänder's own scales — without adding an offered
+anchor, because instrument identity is not level transfer: see
+:mod:`silicon_sampling.anchors.goldwert` for the $5 mode its group-contingent match
+manufactures, and for why an embedded advocacy form is not an outbound link to a
+scientist's newsletter.
 """
 
 from __future__ import annotations
@@ -48,12 +67,15 @@ from functools import lru_cache
 
 import pandas as pd
 
-from ..pfander.outcomes import OUTCOMES
-from . import ccam, crosswalk as cw, tisp
+from ..calibration.tier1 import pfander_instrument
+from ..pfander.outcomes import OUTCOMES, SCALE_RANGE
+from . import ccam, crosswalk as cw, goldwert, tisp
 from .scales import Weighted, sheppard_sd
 
-#: Where each source's measurement comes from.
-SOURCES = {tisp.SOURCE: tisp, ccam.SOURCE: ccam}
+#: Where each source's measurement comes from.  Adding a source needs nothing
+#: else: selection is grade, then coverage, then effective sample size, and all
+#: three are read off the crosswalk rather than off the module.
+SOURCES = {tisp.SOURCE: tisp, ccam.SOURCE: ccam, goldwert.SOURCE: goldwert}
 
 #: The only group the measured referent shift is applied to.  It was estimated
 #: from a pair of *trust* items, so it generalises to trust items and no further:
@@ -79,6 +101,7 @@ class Anchor:
     referent_adjustment: float
     mean_bin_midpoint: float
     sd_slider: float
+    post_stratified: bool
     provenance: str
     notes: tuple[str, ...] = field(default_factory=tuple)
 
@@ -98,6 +121,7 @@ class Anchor:
             "source": self.source,
             "group": self.group,
             "grade": self.grade,
+            "post_stratified": self.post_stratified,
             "n_items": len(self.items),
             "mean_raw": self.mean_raw,
             "referent_adjustment": self.referent_adjustment,
@@ -113,6 +137,21 @@ def _measure(entries: tuple[cw.Entry, ...], midpoint: bool = False) -> Weighted:
 
 def _coverage(entries: tuple[cw.Entry, ...]) -> int:
     return len({entry.pfander_item for entry in entries})
+
+
+def _slider_sd(sd: float, entry: cw.Entry) -> float:
+    """The SD with the *conversion's* granularity removed, and only that.
+
+    Sheppard's correction takes out variance that binning added, so it applies
+    exactly when the source's granularity is coarser than the target's.  A native
+    item shares the target's granularity — whole dollars for whole dollars, 0/1 for
+    0/1 — so there is nothing to remove and the corrected SD is the SD.  Applying
+    the five-option correction there by default would have subtracted 52 from a
+    variance of 14 and reported a dispersion of zero.
+    """
+    if entry.conversion != "likert" or entry.source_options is None:
+        return sd
+    return sheppard_sd(sd, entry.source_options, scale=SCALE_RANGE[entry.pfander_outcome])
 
 
 @lru_cache(maxsize=8)
@@ -138,6 +177,7 @@ def build(min_grade: str = cw.DEFAULT_MIN_GRADE, referent_adjust: bool = True):
             key=lambda pair: (
                 cw.grade_rank(cw.group_grade(pair[0])),
                 -_coverage(pair[0]),
+                not SOURCES[pair[0][0].source].POST_STRATIFIED,
                 -_measure(pair[0]).n_effective,
             ),
         )
@@ -162,7 +202,8 @@ def build(min_grade: str = cw.DEFAULT_MIN_GRADE, referent_adjust: bool = True):
             mean_raw=linear.mean,
             referent_adjustment=adjustment,
             mean_bin_midpoint=_measure(entries, midpoint=True).mean,
-            sd_slider=sheppard_sd(linear.sd, int(entries[0].source_options or 5)),
+            sd_slider=_slider_sd(linear.sd, entries[0]),
+            post_stratified=SOURCES[entries[0].source].POST_STRATIFIED,
             provenance=SOURCES[entries[0].source].PROVENANCE,
             notes=notes,
         )
@@ -170,7 +211,9 @@ def build(min_grade: str = cw.DEFAULT_MIN_GRADE, referent_adjust: bool = True):
 
 
 def levels(
-    min_grade: str = cw.DEFAULT_MIN_GRADE, referent_adjust: bool = True
+    min_grade: str = cw.DEFAULT_MIN_GRADE,
+    referent_adjust: bool = True,
+    applicable_only: bool = True,
 ) -> dict[str, float]:
     """Just the numbers, keyed the way ``calibration.tier1.calibrate`` wants them.
 
@@ -179,10 +222,20 @@ def levels(
     anchor cannot move the leaderboard's ATE metrics in either direction — only the
     response distributions, the demographic baselines and the parity gap, which
     are the three scored analyses no effect calibration reaches.
+
+    ``applicable_only`` drops the outcomes ``calibrate`` treats as binary.  It
+    applies ``levels`` to the continuous outcomes only — a 0/1 outcome's arm rate is
+    moved by flipping rows against a target *effect*, with the frame's own rate as
+    the baseline — so a level handed in for ``newsletter_signup`` is silently
+    ignored.  Silently is the problem: a caller would read the anchor in the table,
+    pass it in, see no error and no change, and have no way to tell which.  Set this
+    to ``False`` to get the raw mapping including levels that will not be applied.
     """
+    binary = set(pfander_instrument().binary)
     return {
         outcome: anchor.mean
         for outcome, anchor in build(min_grade, referent_adjust).items()
+        if not (applicable_only and outcome in binary)
     }
 
 

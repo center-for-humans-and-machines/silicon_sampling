@@ -37,6 +37,27 @@ Only ``verbatim`` and ``near`` are offered as anchors by default.  The
 nothing is a result: without them the report would read as if we had never looked
 at ``belief_post``.
 
+## Three sources, and what a grade is *not* about
+
+TISP and CCAM are post-stratified: both publish a weight that reweights the
+respondents to population margins, and a level taken from them is an estimate of a
+population level.  Goldwert is not.  It is a quota-matched CloudResearch Connect
+panel with no weight in the file, and its own authors write that "despite our
+sample approximating the United States population on age, race, gender, and
+ethnicity, it is not a truly representative sample, and might embed biases
+associated with online panel samples", vouching explicitly for
+*between-condition* comparisons rather than for levels.  That is precisely the
+distinction this package turns on, so it is a grading input in its own right,
+separate from wording.
+
+It is worth being clear that a grade here answers one question — *can this item's
+level stand in for the Pfänder item's level* — and that this is a different
+question from the one Goldwert's own ``PFANDER_ANCHORS`` table answers with
+``near_identical``.  That table is right that the donation is the same scale, the
+same units and the same real-money mechanism; two rows here nonetheless come out
+``construct-only``, because identity of *instrument* is not transfer of *level*.
+The disagreement is about which question is being graded, not about the facts.
+
 ## The referent shift, and why it is not free
 
 Every ``TRUST_SCI_*`` row is graded ``near`` and not ``verbatim`` for one reason:
@@ -57,6 +78,13 @@ from ..pfander.outcomes import OUTCOMES
 
 #: Grades from best to worst.  Order is the API: ``at_least`` slices this list.
 GRADES = ("verbatim", "near", "construct-only", "unusable")
+
+#: How a source item reaches Pfänder's scale.  ``likert`` converts from a fixed
+#: number of response options, ``native`` means the item is already on that scale
+#: and the identity is the honest transform, and ``none`` means no defensible
+#: transform exists — an unordered category set, or a slider whose polarity cannot
+#: be established — so no number is produced at all.
+CONVERSIONS = ("likert", "native", "none")
 
 #: The grade at or above which an anchor is offered without the caller asking.
 DEFAULT_MIN_GRADE = "near"
@@ -85,6 +113,7 @@ class Entry:
     grade: str
     note: str
     group: str
+    conversion: str = "likert"
     missing_codes: tuple[float, ...] = ()
 
     def __post_init__(self) -> None:
@@ -92,6 +121,15 @@ class Entry:
             raise ValueError(f"unknown grade {self.grade!r}")
         if self.pfander_outcome not in OUTCOMES:
             raise ValueError(f"not a scored outcome: {self.pfander_outcome!r}")
+        if self.conversion not in CONVERSIONS:
+            raise ValueError(f"unknown conversion {self.conversion!r}")
+        # The two fields have to agree or a measurement silently takes the wrong
+        # path: a likert row without an option count cannot be converted, and a
+        # native or unconvertible row has no option count to offer.
+        if self.conversion == "likert" and not (self.source_options or 0) >= 2:
+            raise ValueError(f"{self.source_item}: likert needs >= 2 options")
+        if self.conversion != "likert" and self.source_options is not None:
+            raise ValueError(f"{self.source_item}: {self.conversion} takes no options")
 
 
 _SLIDER = "0-100 slider"
@@ -565,6 +603,7 @@ _OTHERS = (
             "other / global warming is not happening / don't know"
         ),
         source_options=None,
+        conversion="none",
         grade="unusable",
         note=(
             "a cause attribution and a conditional one at that, not a rated accuracy; "
@@ -607,6 +646,196 @@ _OTHERS = (
     ),
 )
 
+
+_MATCH_NOTE = (
+    "same scale, same units and the same real-money mechanism (both studies pay "
+    "out 100 randomly chosen participants), which is as close as any source item "
+    "in this crosswalk gets. Downgraded anyway on three counts. Goldwert adds a "
+    "group-contingent match - the pool doubles if at least half of participants "
+    "give $5 or more - and the control arm's distribution shows exactly what that "
+    "buys: 29.6% of respondents give precisely $5, against 1.5-3.6% at each of "
+    "$1, $2, $3, $4, $6, $7, $8 and $9. Pfander has no match, so that mode cannot "
+    "exist there, and the mass it holds is worth roughly half a dollar of the mean "
+    "on an order-of-magnitude reckoning - about the whole error budget. The "
+    "recipient differs in kind: an unnamed environmental advocacy organisation "
+    "against the named American Meteorological Society, framed as a scientific "
+    "society, which in the US moves who is willing to give and in the opposite "
+    "direction. And the sample carries no weight."
+)
+
+_GOLDWERT = (
+    Entry(
+        pfander_outcome="donation_ams",
+        pfander_item="donation",
+        pfander_text=(
+            "Allocation of a $10 bonus to the American Meteorological Society, a "
+            "non-profit, non-partisan society of 12,000 scientists that supports "
+            "climate change research"
+        ),
+        pfander_scale="0-10 whole dollars; 100 participants' choices paid out",
+        source="Goldwert",
+        source_item="donation",
+        source_text=(
+            "Allocation of a $10 bonus between the respondent and an environmental "
+            "organization, with the pool doubled if at least half of participants "
+            "give $5 or more"
+        ),
+        source_scale="0-10 whole dollars; 100 participants' choices paid out",
+        source_options=None,
+        conversion="native",
+        grade="construct-only",
+        note=_MATCH_NOTE,
+        group="Goldwert donation",
+    ),
+    Entry(
+        pfander_outcome="newsletter_signup",
+        pfander_item="newsletter",
+        pfander_text=(
+            'Did you subscribe to the "Talking Climate" newsletter on the previous '
+            "page? (an outbound link to climate scientist Katharine Hayhoe's "
+            "newsletter, opened in a new tab)"
+        ),
+        pfander_scale="0/1",
+        source="Goldwert",
+        source_item="newsletter1",
+        source_text=(
+            "Signed up to the 350.org newsletter through the organisation's own "
+            "signup form, embedded in the survey page"
+        ),
+        source_scale="0/1",
+        source_options=None,
+        conversion="native",
+        grade="construct-only",
+        note=(
+            "the same binary act on the same scale, but the friction and the "
+            "organisation both differ in ways that routinely halve or double a "
+            "signup rate: an advocacy group's form embedded in the page against an "
+            "outbound link to a scientist's newsletter that the respondent must "
+            "open in a new tab and come back from. Goldwert's own two embedded "
+            "advocacy forms already differ by 2.4 points (350.org 0.243, Citizens' "
+            "Climate Lobby 0.218), which is a floor on the item-level variability, "
+            "and a link-out is a far larger change than one organisation for "
+            "another. `newsletter1` is used rather than the `newsletter` column, "
+            "which is the OR of the two forms and so mechanically exceeds either. "
+            "Note also that `tier1.calibrate` applies `levels` to continuous "
+            "outcomes only, so a level for this outcome cannot reach a submission "
+            "through the validated path even if it were graded higher."
+        ),
+        group="Goldwert newsletter1",
+    ),
+    Entry(
+        pfander_outcome="behavior_mean",
+        pfander_item="individual_talk_1",
+        pfander_text=(
+            "Talk to friends and family about the importance of climate change "
+            "(how likely in the next twelve months)"
+        ),
+        pfander_scale=f"{_SLIDER}, endpoints Not likely at all / Extremely likely",
+        source="Goldwert",
+        source_item="conversation",
+        source_text=(
+            "Commitment to talking about climate change with close others"
+        ),
+        source_scale="0-100 slider whose handle starts at 0",
+        source_options=None,
+        conversion="native",
+        grade="construct-only",
+        note=(
+            "closest wording match anywhere for one of the six behaviour items, and "
+            "already on a 0-100 slider, but the handle starts at 0 so a respondent "
+            "who never touched it is recorded as a hard 0 rather than as missing - "
+            "the level is a mixture of intentions and non-responses in unknown "
+            "proportion. Still one item of six, and the sample carries no weight. "
+            "Kept because it is a third independent estimate of a behaviour-"
+            "intention level, against CCAM's discuss_GW"
+        ),
+        group="Goldwert conversation",
+    ),
+    Entry(
+        pfander_outcome="behavior_mean",
+        pfander_item="behavior_mean (no counterpart item)",
+        pfander_text=(
+            "Mean of six stated likelihoods over the next twelve months: eat less "
+            "meat, use transport alternatives, install solar, fly less, talk to "
+            "others, donate to an environmental NGO"
+        ),
+        pfander_scale=f"{_SLIDER} mean of six items",
+        source="Goldwert",
+        source_item="petition",
+        source_text=(
+            "Signed the Environmental Defense Fund methane petition on the "
+            "organisation's own live action page"
+        ),
+        source_scale="0/1",
+        source_options=None,
+        conversion="none",
+        grade="unusable",
+        note=(
+            "a completed real action against a mean of stated intentions. The "
+            "obstacle is the same one that rules out CCAM's happening item for "
+            "belief_post: a proportion is not the mean of a 0-100 intention scale, "
+            "and there is no defensible transform between them. Recorded because "
+            "Goldwert's own anchor table offers it, graded adjacent, for the "
+            "different purpose of bounding how far a real behaviour moves"
+        ),
+        group="Goldwert petition",
+    ),
+    Entry(
+        pfander_outcome="belief_post",
+        pfander_item="belief_post_1",
+        pfander_text=(
+            'How accurate do you think this statement is? "Human activities are '
+            'causing climate change."'
+        ),
+        pfander_scale=f"{_SLIDER}, endpoints not at all accurate / extremely accurate",
+        source="Goldwert",
+        source_item="belief_1",
+        source_text="Belief that climate change is happening and human-caused",
+        source_scale=(
+            "0-100 slider, reverse-labelled (Very much so at the left, Not at all "
+            "at the right), handle starting at 0"
+        ),
+        source_options=None,
+        conversion="none",
+        grade="unusable",
+        note=(
+            "the closest belief item in any of the three sources and it still "
+            "cannot be used: its polarity is not established. The labels say high "
+            "means less belief, the party gap says the opposite (Democrats 63.3, "
+            "Republicans 57.5) and the display-position slope agrees with the "
+            "labels, rising 48.7 to 57.2 where every other outcome falls. The "
+            "authors report neither this item nor policy_1. An anchor whose sign is "
+            "unknown is worse than none, so no number is produced"
+        ),
+        group="Goldwert belief_1",
+    ),
+    Entry(
+        pfander_outcome="policy_general",
+        pfander_item="policy_general_1",
+        pfander_text=(
+            'How much do you oppose or support the following statement? "The U.S. '
+            'government should do more to reduce global warming"'
+        ),
+        pfander_scale=f"{_SLIDER}, endpoints Strongly oppose / Strongly support",
+        source="Goldwert",
+        source_item="policy_1",
+        source_text="Support for a transition away from fossil fuels",
+        source_scale=(
+            "0-100 slider, reverse-labelled like belief_1, handle starting at 0"
+        ),
+        source_options=None,
+        conversion="none",
+        grade="unusable",
+        note=(
+            "same unresolved polarity as belief_1, and the evidence is worse here: "
+            "there is no party gap at all (Democrats 56.6, Republicans 57.5) on one "
+            "of the most polarised questions in US politics, which says the item is "
+            "not measuring what its name says in a single consistent direction"
+        ),
+        group="Goldwert policy_1",
+    ),
+)
+
 #: Every (Pfänder item, source item) pair considered, graded.
 CROSSWALK: tuple[Entry, ...] = (
     _trust_entries()
@@ -614,6 +843,7 @@ CROSSWALK: tuple[Entry, ...] = (
     + _policy_role_entries()
     + _policy_support_entries()
     + _OTHERS[2:]
+    + _GOLDWERT
 )
 
 #: Outcomes for which neither source carries a candidate item at all, and why.
@@ -626,13 +856,6 @@ UNMATCHED: dict[str, str] = {
         "no source item asks about the EPA, NASA, NOAA, universities or the federal "
         "government; TISP's CLIM_GOV battery is about government conduct on climate, "
         "not trust in named institutions"
-    ),
-    "donation_ams": (
-        "a behavioural allocation of real money on a 0-10 scale; no survey item can "
-        "stand in for it"
-    ),
-    "newsletter_signup": (
-        "a recorded click on a specific newsletter; no survey item can stand in for it"
     ),
 }
 

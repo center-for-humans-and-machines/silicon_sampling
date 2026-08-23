@@ -62,6 +62,8 @@ SOURCE = "CCAM"
 WEIGHT = "weight_wave"
 #: Wave 31, Dec 2024: the most recent, and the most recent one that is complete.
 DEFAULT_WAVE = 31.0
+#: Post-stratified: ``weight_wave`` reweights each wave to population margins.
+POST_STRATIFIED = True
 PROVENANCE = "CCAM (Ipsos KnowledgePanel), wave 31, Dec 2024, n = 1,013, weight_wave"
 
 
