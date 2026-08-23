@@ -1,4 +1,4 @@
-# [DRAFT] Optimize the Pfänder megastudy prediction
+# [ACTIVE] Optimize the Pfänder megastudy prediction
 
 Task: [docs/tasks/macro_task.md](../tasks/macro_task.md)
 
@@ -14,10 +14,21 @@ version is used and the error is named.
 
 ## 0. The finding that reorganises the whole task
 
-The leaderboard is sorted on **pooled Pearson r** over the 208 (outcome ×
-intervention) ATE pairs — `arrange(desc(submission == "Human replication"),
-desc(pearson_r))` in the benchmark's own code. Everything else is reported beside
-it, not ranked on.
+**Scoring is multi-objective.** The benchmark scores ATE recovery (directional %,
+Spearman, Pearson, `pearson_within`, `pearson_adj`, RMSE, `rmse_adj`), the
+calibration regression (α, β, `beta_adj`), response distributions (variance ratio,
+OVL, KS, W1), subgroup effects, demographic baselines, parity gaps and
+stereotyping coefficients. The *leaderboard sort key* is pooled Pearson r —
+`arrange(desc(submission == "Human replication"), desc(pearson_r))` — and the
+preregistration names r the "key metric" for Sections 1–2 and the variance ratio
+the key metric for Section 3, but it explicitly declines to collapse them into a
+composite. **We optimise all of them.**
+
+That decision is what makes calibration central rather than decorative. A global
+effect rescale cannot move the sort key, but it is close to the whole story for β
+and RMSE; level and dispersion repair are the whole story for Section 3; and only
+a per-outcome re-profiling moves r. These are largely *independent* levers on
+*different* metrics, so the right posture is a portfolio, not a single bet.
 
 Decomposing the human effect vector on Voelkel (the one study where we have both
 a silicon sample and real responses), verified this session:
@@ -35,9 +46,12 @@ a silicon sample and real responses), verified this session:
 replication by a wide margin.** Ranking the 16 messages is the minority
 shareholder in the metric we are scored on.
 
-So the project's central deliverable is **a calibrated per-outcome effect profile
-for Pfänder**, and the calibration studies exist to supply it. Message ranking is
-a secondary concern that we improve where it is free.
+So the largest single lever on the sort key is **a calibrated per-outcome effect
+profile for Pfänder**, and the calibration studies exist to supply it. Message
+ranking is a secondary concern that we improve where it is free. But the profile is
+one lever among several, and the metrics it cannot touch — RMSE, β, and every
+distributional and demographic diagnostic — are reached by the other calibrations
+in §2, which is why the plan runs all of them rather than picking one.
 
 ### The contradiction in the recon, resolved
 
@@ -502,35 +516,84 @@ test between approaches. So hedging is free. The three entries should differ alo
 
 ---
 
-## 9. Open questions for you
+## 9. Decisions taken (2026-08-23)
 
-Four things I cannot decide from the task, the code, or the benchmark's rules.
-Only the first blocks anything.
+1. **Post-hoc transformation is approved.** Anything built on public datasets is
+   allowed under the megastudy's rules and will be documented properly. So the
+   §6 respondent-level reconstruction is the sanctioned mechanism, and the raw
+   untransformed export still goes into `raw_data_deposit/`.
+2. **Team metadata comes later.** Placeholders (`team_id: mpib`) go in now so the
+   format gate can run; the real values are filled in at the end.
+3. **All three effect studies are in: Voelkel, ICPC (Doell/Vlasceanu), Goldwert** —
+   conditional only on producing good questionnaire templates for them. Nothing is
+   cut on time grounds *now*; scope decisions get revisited near the deadline. The
+   standing rule instead is: **always keep a calibrated Pfänder result ready**, and
+   keep working the unfinished calibration studies behind it. Qwen2.5-7B runs
+   locally and is effectively free, so breadth is not budget-limited.
+4. **Disk has been freed.**
 
-1. **Is post-hoc transformation of the simulated respondent-level data acceptable
-   for this submission?** §6 rebuilds respondent values so the refit ATEs equal
-   our calibrated targets. It is within the letter of the rules — only point
-   estimates are scored, the untransformed raw export is deposited, and the method
-   is disclosed — and without it "calibration" cannot be expressed in a Tier-1
-   entry at all. But it is the difference between submitting a simulation and
-   submitting a simulation-plus-statistical-model, and it should be your call, not
-   mine. If the answer is no, the whole plan reduces to Tier-0 model selection and
-   I should know that before Phase 0. **My recommendation: yes, with the method
-   documented prominently in `metadata.json`'s abstract and the report.**
-2. **Team metadata.** `metadata.json` needs `team_id`, `team_name`, `contact`,
-   `creators` (name, affiliation, ORCID), `abstract`, `code_repository`, and a
-   `disclosure_class` (A/B/C). I will stage placeholders so the format gate can go
-   green, but the real values have to come from you.
-3. **Goldwert: in or out?** Currently cut. It is the closest design sibling to
-   Pfänder and the only way to get a *second* profile-transfer test, which is the
-   plan's main uncertainty. Adding it costs 2–3 agent-days and would displace the
-   Voelkel arm recovery and probably one prefill resample.
-4. **Local disk.** `/opt/silicon_sampling` is at 91% (85 GB free). Three more
-   full-size runs with raw transcripts (~510 MB each for Qwen, plus 74 MB of
-   derived files) fit, but not with much room. Say the word if I should drop raw
-   transcript retention for the new runs.
+### Working rules for the rest of the task
 
----
+- **Autonomous until done.** Ping Slack only for things a human must fix — a dead
+  DAIS connection, a cluster misconfiguration that blocks the task — and then stop
+  and wait rather than working around it.
+- **Queue patience is the policy, not a fallback.** Per
+  [handling_cluster_queues](../../.claude/skills/handling_cluster_queues/SKILL.md),
+  a 15-hour wait is not a reason to cancel, resubmit, or escalate. Jobs are
+  designed to minimise queue exposure instead: **never more than 4 GPUs**, walls
+  sized near the estimate rather than at the 24 h cap, resume by resubmitting the
+  identical body. **Qwen2.5-72B goes first** — V4-Flash needs the most GPUs at once
+  and so queues worst, and 72B is both faster per respondent and cheaper to
+  schedule.
+- **The calibration search is open-ended.** Effect-size rescaling is the start, not
+  the scope. Any transformation that can reasonably be expected to improve a
+  Pfänder metric is a candidate, and candidates are generated *from* the data as it
+  arrives. §2 lists what is already identified; §2.5 below is the standing agenda
+  for what to look for next.
+
+## 9.5 The open calibration agenda
+
+Beyond the effect-level work in §2, these are the families to build and test as
+each new sample lands. Each is testable on any study where we have both a silicon
+sample and real responses.
+
+**Demographic responsiveness rescaling.** The measured failure is that base models
+barely condition on who they are told they are: Qwen's party gap on climate belief
+is 1.1 points where reality is tens, and its largest moderator R² beyond condition
+is 0.002. V4-Flash overshoots instead (12.4 points, R² 0.037). Neither is right, and
+both are *fixable in the respondent-level data* because the direction and rough size
+of real US demographic gaps are known from CCAM and measurable in every calibration
+study. The estimator: decompose each respondent's answer into a condition mean, a
+demographic-cell offset, and an individual residual; then rescale the offset toward
+the human gap, `offset' = γ_m · offset` with `γ_m` fit per moderator on the
+calibration studies, or replace it outright with the human cell offset where a
+ground-truth anchor exists. This targets the stereotyping coefficients, the parity
+gap, demographic baselines and the within-subgroup distributions — four scored
+analyses that no effect-level calibration can reach. It also plausibly improves
+subgroup-effect recovery, though the Voelkel finding that visible and invisible
+moderators predict equally well (r 0.236 vs 0.237) says not to expect much there.
+
+**Response-shape repair.** Round-number heaping (42–60% of item answers are
+multiples of 10), the midpoint attractor (26.6% of `funding_perceptions` answers are
+exactly 50), ceiling pile-up (36.5% of `belief_post` at 100), straight-lining, and
+the within-battery position decay (−2.66 points per item across the 12-item trust
+battery, r = −0.906). Each is a candidate for a rank-preserving repair that improves
+OVL/KS/W1 without touching the condition means.
+
+**Missingness injection.** Every synthetic respondent answers every item; the real
+instrument lets participants skip most of them. The human data will carry
+missingness ours does not. Whether that costs anything scored is unknown and worth
+measuring.
+
+**Per-outcome reliability weighting.** Use the calibration studies to learn which
+*kinds* of outcome are predictable at all, and shrink the unpredictable ones harder
+— a principled generalisation of the `true_sd ≈ 0` flattening in §2 (B2).
+
+**Cross-model and cross-seed ensembling** beyond the pairwise average already
+measured, including precision weighting rather than 50/50.
+
+Each candidate is held to the §5 pre-commitment: it must earn its place in
+held-out scoring, on a named metric, with its degrees of freedom counted.
 
 ## 10. Risks
 

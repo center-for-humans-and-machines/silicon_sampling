@@ -11,12 +11,14 @@ from __future__ import annotations
 #: Run key -> Hugging Face model id.
 MODELS = {
     "qwen25_7b": "Qwen/Qwen2.5-7B",
+    "qwen25_72b": "Qwen/Qwen2.5-72B",
     "v4_flash": "deepseek-ai/DeepSeek-V4-Flash-Base",
 }
 
 #: Human-readable names for report tables and plot legends.
 LABELS = {
     "qwen25_7b": "Qwen2.5-7B",
+    "qwen25_72b": "Qwen2.5-72B",
     "v4_flash": "DeepSeek-V4-Flash",
 }
 
@@ -34,6 +36,14 @@ DEFAULT_RUN = "qwen25_7b"
 #: bf16-KV model: the checkpoint ships the UE8M0 scales, so this is the precision
 #: DeepSeek built the model to run at.  It is still an asymmetry with the
 #: Qwen2.5-7B run, which used bf16 KV, and the comparison reports say so.
+#:
+#: ``qwen25_72b`` needs nothing special.  It is a dense bf16 model, so its KV
+#: cache is ordinary GQA — 80 layers x 8 kv heads x 128 dims x 2 (k and v) x 2 B
+#: = 320 KB per token, three times Qwen2.5-7B's 57 KB and a third of
+#: V4-Flash's ~1 MB.  That middle position is the whole reason it is worth
+#: sampling with: 145 GB of weights and a cheap cache buy a far larger resident
+#: group than V4-Flash's 295 GB and hybrid MLA cache manage, which is what
+#: throughput is actually made of here.
 ENGINE_DEFAULTS = {
     "v4_flash": {"kv_cache_dtype": "fp8_ds_mla"},
 }
