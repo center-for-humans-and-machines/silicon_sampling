@@ -333,47 +333,56 @@ BEST_RANKERS = ("qwen25_7b", "qwen25_72b")
 #: The run three independent sources agree is closest to real response levels.
 GROUNDED = "v4_flash"
 
-#: Mean signed human intervention effect, in pp of scale range, per reference
-#: study.  These are the numbers that decide whether shrinkage is warranted at
-#: all, and they disagree by 4.5x — see :func:`hybrid_default`.
+#: Mean absolute human intervention effect, in pp of scale range, per study.
+#: Real effect magnitudes genuinely differ 4.5-fold between these studies, which
+#: is why an *absolute* effect target does not transfer.
 HUMAN_EFFECT_SCALE = {
     "Voelkel": 1.125,  # democratic norms, 2022
     "Goldwert": 2.967,  # climate advocacy, US megastudy
     "ICPC": 5.035,  # climate belief and policy, US subsample
 }
 
+#: The RMSE-optimal shrinkage factor, measured on matched pairs in every
+#: (study, model) cell available: 0.159 / 0.125 / 0.112 for the three models on
+#: Voelkel, 0.216 on ICPC and 0.226 on Goldwert for Qwen2.5-72B.
+#: Leave-one-study-out puts its out-of-fold estimates at 0.198-0.222, a spread of
+#: 1.12x.
+#:
+#: The *ratio* transfers even though neither of its parts does, which is what makes
+#: it usable: human effects run 1.1 to 5.0 pp across these studies and ours run 2.8
+#: to 5.5, and the quotient stays near 0.2.
+GLOBAL_SHRINK = 0.2
+
 
 def hybrid_default(
     effects_from: str | tuple[str, ...] = BEST_RANKERS,
     grounded: str = GROUNDED,
-    shrink: float | None = None,
+    shrink: float | None = GLOBAL_SHRINK,
 ) -> Recipe:
     """The component hybrid: the best rankers' averaged effects, one model's context.
 
-    **``shrink`` defaults to None, and that is a reversal worth explaining.**  The
-    factor fitted on Voelkel is 0.159, and its out-of-fold estimates there span
-    only 0.137-0.185 — stable enough that it looked safe to carry as a single
-    number.  It is not, because that stability is *within* one study and the
-    quantity it encodes is not a property of the sampler alone: it is the ratio of
-    real effects to ours, and real effects differ enormously between studies.
-    Mean signed human intervention effect, in pp of scale range:
-    Voelkel 1.125, Goldwert 2.967, ICPC 5.035 — a 4.5-fold range.
+    **``shrink`` defaults to 0.2, after one wrong turn worth recording.**  The
+    factor was first taken from Voelkel alone (0.159), then dropped entirely on the
+    grounds that real effect magnitudes differ 4.5-fold between studies (Voelkel
+    1.125 pp, Goldwert 2.967, ICPC 5.035) so no single target could transfer.  That
+    reasoning compared our Pfänder effects against human effects computed on *other
+    studies' pair sets* — different instruments, different outcome mixes, different
+    arm counts — which is not a comparison at all.
 
-    Our own Pfänder effects average 2.46 pp (Qwen2.5-7B, over all 208 pairs), so
-    the implied factor is 0.46 against Voelkel, 1.20 against Goldwert and 2.04
-    against ICPC.  **The range spans 1.0, so the direction of the correction is not
-    even determined**, and Pfänder is a climate study, which makes Voelkel — a
-    2022 democratic-norms study with unusually small real effects — the worst of
-    the three to fit it on.  Applying 0.159 would shrink our effects to 0.39 pp
-    against a climate-megastudy reference of 3-5 pp: an 8-13x under-prediction, and
-    a large RMSE error in the opposite direction to the one it was meant to fix.
+    Matched pair by pair within each study it comes out stable.  The RMSE-optimal
+    factor is 0.159 / 0.125 / 0.112 for the three models on Voelkel, 0.216 on ICPC
+    and 0.226 on Goldwert, and leave-one-study-out puts its out-of-fold estimates
+    at 0.198-0.222 — a spread of 1.12x across three studies.  **The ratio transfers
+    even though neither of its parts does**, which is what makes it usable: human
+    effects run 1.1 to 5.0 pp and ours 2.8 to 5.5, and the quotient stays near 0.2.
 
-    So the finding that base models "exaggerate effects 3-6x" is substantially a
-    Voelkel artefact rather than a property of the samplers.  Shrinkage is offered
-    as an explicit variant rather than applied by default, and the honest summary
-    is that our Pfänder effect magnitudes are already inside the range real
-    climate megastudies produce.
-
+    Note this is the *RMSE-optimal* factor, a regression through the origin, and it
+    is much smaller than the factor that would match our effect spread to the
+    humans' (0.40 to 0.92).  The two diverge exactly because the correlation is
+    low: a predictor that barely correlates should barely predict, so minimising
+    squared error shrinks far harder than matching variance.  Shrinkage is provably
+    neutral on the leaderboard's sort key either way, so this choice is about RMSE
+    and beta only.
     Caveat on the largest reference: ICPC's US control arm is small (n = 669) and
     its effects run hotter than the paper's global headline, so 5.035 is the least
     secure of the three. Excluding it still leaves a 2.6-fold range that spans 1.0.
