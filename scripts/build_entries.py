@@ -14,23 +14,26 @@ resolve at six intervention clusters, rather than being near-duplicates:
     separable.
 
 ``secondary-1``
-    The same, with a global effect shrinkage toward the mid-climate reference.
-    Hedges the one parameter whose right value is genuinely unknown: our effect
-    scale sits *below* both climate references and *above* the democratic-norms
-    one, so the direction of the correction is undetermined.
+    The same **without** global shrinkage.  Shrinkage is provably neutral on the
+    leaderboard's sort key and close to the whole story for RMSE and beta, so this
+    entry is the hedge on the one axis where the two differ at all.
 
 ``secondary-2``
     The uncalibrated best single ranker.  Insurance against every calibration
     being wrong, and the diagnostic baseline the report measures the others
     against.
 
-**Why no global shrinkage in the primary.**  The factor is not a property of the
-sampler, it is the ratio of real effects to ours, and real human intervention
-effects differ 4.5-fold between the reference studies (Voelkel 1.125 pp, Goldwert
-2.967, ICPC 5.035).  Our averaged Pfänder effects run 2.467 pp after within-outcome
-shrinkage, so the implied factor is 0.46 against Voelkel but 1.20 against Goldwert
-and 2.04 against ICPC.  Pfänder is a climate study, both climate references sit
-above our scale, and so shrinking further would move us away from them.
+**Why the primary shrinks by 0.2.**  Measured on matched pairs in every
+(study, model) cell available, the RMSE-optimal factor is 0.159 / 0.125 / 0.112 for
+the three models on Voelkel, 0.216 on ICPC and 0.226 on Goldwert for Qwen2.5-72B;
+leave-one-study-out puts its out-of-fold estimates at 0.198-0.222.  The *ratio*
+transfers even though neither of its parts does — real human effects run 1.1 to
+5.0 pp across these studies and ours 2.8 to 5.5, and the quotient stays near 0.2.
+
+An earlier version of this script shipped no shrinkage at all, on the reasoning
+that a 4.5-fold spread in absolute human effect magnitudes made no target
+transferable.  That compared our effects against human effects computed on *other
+studies' pair sets*, which is not a comparison; matched within study it is stable.
 
 Run: ``python scripts/build_entries.py [--team-id mpib] [--out-root ...]``
 """
@@ -48,9 +51,6 @@ from silicon_sampling.submission import build as SB
 from silicon_sampling.submission import check as SC
 from silicon_sampling.submission import spec as SP
 
-#: Mid-point of the two climate references, used only by the shrunk variant.
-CLIMATE_MID_KAPPA = 1.2
-
 RAW_EXPORT = Path("data/pfander/silicon_sampling/qwen25_7b/samples.csv")
 
 
@@ -66,15 +66,15 @@ def entries(anchors: dict[str, float]) -> list[tuple[str, R.Recipe]]:
         level_anchors=anchors,
     )
     return [
-        ("primary", R.Recipe(name="combined", effects_from=best, **common)),
+        (
+            "primary",
+            R.Recipe(
+                name="combined", effects_from=best, shrink=R.GLOBAL_SHRINK, **common
+            ),
+        ),
         (
             "secondary-1",
-            R.Recipe(
-                name="combined+climate-shrink",
-                effects_from=best,
-                shrink=CLIMATE_MID_KAPPA,
-                **common,
-            ),
+            R.Recipe(name="combined-unshrunk", effects_from=best, **common),
         ),
         ("secondary-2", R.uncalibrated(best[0])),
     ]
