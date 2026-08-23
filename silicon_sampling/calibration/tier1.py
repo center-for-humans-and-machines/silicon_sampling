@@ -36,6 +36,8 @@ is visible rather than absorbed.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 import numpy as np
 import pandas as pd
 
@@ -55,12 +57,54 @@ TRUST_ITEMS = tuple(
 BINARY_OUTCOMES = ("newsletter_signup",)
 
 
-def scale_of(outcome: str) -> float:
+@dataclass(frozen=True)
+class Instrument:
+    """The study-specific facts :func:`calibrate` needs, so it is not Pfänder-only.
+
+    An earlier version hard-wired Pfänder's control label, scale ranges and trust
+    battery, which meant a calibration could be *applied* through this module but
+    had to be *validated* by calling the layer underneath it.  That is exactly the
+    gap where a bug survives review: the path that produced the evidence was not
+    the path that produced the submission.  Everything study-specific now arrives
+    here instead.
+    """
+
+    #: outcome -> native scale range, e.g. 100.0 for a slider, 10.0 for the donation.
+    scales: dict[str, float]
+    control: str = CONTROL
+    moderators: tuple[str, ...] = ()
+    #: outcomes that are 0/1 and must be moved by flipping rows, not by adding.
+    binary: tuple[str, ...] = ()
+    #: composite -> the items whose plain mean it must equal.
+    composites: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+    @property
+    def outcomes(self) -> tuple[str, ...]:
+        return tuple(self.scales)
+
+
+def pfander_instrument() -> Instrument:
+    """Pfänder's own configuration, read from the study package rather than copied."""
+    return Instrument(
+        scales=dict(pfander_outcomes.SCALE_RANGE),
+        control=CONTROL,
+        moderators=tuple(pfander_outcomes.MODERATORS),
+        binary=BINARY_OUTCOMES,
+        composites={"trust_multidimensional": TRUST_ITEMS},
+    )
+
+
+def scale_of(outcome: str, instrument: Instrument | None = None) -> float:
     """The outcome's native range, used to convert pp back to raw points."""
-    return float(pfander_outcomes.SCALE_RANGE[outcome])
+    scales = (instrument or pfander_instrument()).scales
+    return float(scales[outcome])
 
 
-def pp_to_raw(effects: pd.DataFrame, column: str = "estimate") -> pd.DataFrame:
+def pp_to_raw(
+    effects: pd.DataFrame,
+    column: str = "estimate",
+    instrument: Instrument | None = None,
+) -> pd.DataFrame:
     """Convert an effect table from pp of scale range back to raw outcome points.
 
     The benchmark scores in pp, so calibrations are fitted and expressed there.
@@ -69,7 +113,7 @@ def pp_to_raw(effects: pd.DataFrame, column: str = "estimate") -> pd.DataFrame:
     ``donation_ams`` (by 10x) and ``newsletter_signup`` (by 100x).
     """
     out = effects.copy()
-    factor = out["outcome"].map(lambda name: scale_of(name) / 100.0)
+    factor = out["outcome"].map(lambda name: scale_of(name, instrument) / 100.0)
     out[column] = out[column] * factor
     if "se" in out.columns:
         out["se"] = out["se"] * factor
@@ -77,17 +121,20 @@ def pp_to_raw(effects: pd.DataFrame, column: str = "estimate") -> pd.DataFrame:
 
 
 def _target_effects(
-    frame: pd.DataFrame, outcome: str, targets: pd.DataFrame | None
+    frame: pd.DataFrame,
+    outcome: str,
+    targets: pd.DataFrame | None,
+    control: str,
 ) -> pd.Series:
     """The condition effects to aim at: supplied ones, or the frame's own."""
     if targets is None:
-        return condition_effects(frame, outcome, CONTROL)
+        return condition_effects(frame, outcome, control)
     picked = targets[targets["outcome"] == outcome]
     if picked.empty:
-        return condition_effects(frame, outcome, CONTROL)
+        return condition_effects(frame, outcome, control)
     wanted = picked.set_index("condition")["estimate"]
-    if CONTROL not in wanted.index:
-        wanted[CONTROL] = 0.0
+    if control not in wanted.index:
+        wanted[control] = 0.0
     return wanted
 
 
@@ -96,6 +143,7 @@ def calibrate_binary(
     outcome: str,
     targets: pd.Series,
     seed: int = 0,
+    control: str = CONTROL,
 ) -> np.ndarray:
     """Move a 0/1 outcome's per-arm rate onto target by flipping the fewest rows.
 
@@ -106,7 +154,7 @@ def calibrate_binary(
     """
     rng = np.random.default_rng(seed)
     values = frame[outcome].to_numpy(float).copy()
-    baseline = float(np.nanmean(values[frame["condition"].to_numpy() == CONTROL]))
+    baseline = float(np.nanmean(values[frame["condition"].to_numpy() == control]))
     for arm in frame["condition"].unique():
         rows = np.flatnonzero(frame["condition"].to_numpy() == arm)
         if len(rows) == 0:
@@ -130,10 +178,11 @@ def calibrate(
     targets: pd.DataFrame | None = None,
     levels: dict[str, float] | None = None,
     offsets: dict[str, dict[str, pd.Series]] | None = None,
-    moderators: tuple[str, ...] = tuple(pfander_outcomes.MODERATORS),
-    outcomes: tuple[str, ...] = tuple(pfander_outcomes.OUTCOMES),
+    moderators: tuple[str, ...] | None = None,
+    outcomes: tuple[str, ...] | None = None,
     seed: int = 20260823,
     targets_in_pp: bool = True,
+    instrument: Instrument | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Rebuild a Tier-1 frame with calibrated effects, levels and demographic gaps.
 
@@ -144,41 +193,52 @@ def calibrate(
     since Pfänder publishes no human data of its own.  ``offsets`` overrides the
     demographic offsets per outcome.
 
+    ``instrument`` supplies the study's control label, scale ranges, binary
+    outcomes and composites; it defaults to Pfänder's.  Passing another study's
+    lets a calibration be validated through this exact code path rather than
+    through the layer beneath it.
+
     Returns the rebuilt frame and the per-outcome drift audit.  Check the audit:
     a non-zero ``max_abs_effect_drift`` means a target was not reachable on that
     outcome's scale.
     """
+    design = instrument or pfander_instrument()
+    control = design.control
+    moderators = moderators if moderators is not None else design.moderators
+    outcomes = outcomes if outcomes is not None else design.outcomes
     if targets is not None and targets_in_pp:
-        targets = pp_to_raw(targets)
+        targets = pp_to_raw(targets, instrument=design)
 
     continuous = [
-        name
-        for name in outcomes
-        if name not in BINARY_OUTCOMES and name in frame.columns
+        name for name in outcomes if name not in design.binary and name in frame.columns
     ]
     parts: dict[str, Decomposition] = {}
     for outcome in continuous:
-        part = decompose(frame, outcome, moderators, CONTROL)
+        part = decompose(frame, outcome, moderators, control)
         parts[outcome] = Decomposition(
             outcome=outcome,
             level=(levels or {}).get(outcome, part.level),
-            effects=_target_effects(frame, outcome, targets),
+            effects=_target_effects(frame, outcome, targets, control),
             offsets=(offsets or {}).get(outcome, part.offsets),
             residuals=part.residuals,
         )
 
-    bounds = {name: (0.0, scale_of(name)) for name in continuous}
-    rebuilt, drift = recompose_frame(frame, parts, CONTROL, bounds=bounds, seed=seed)
+    bounds = {name: (0.0, scale_of(name, design)) for name in continuous}
+    rebuilt, drift = recompose_frame(frame, parts, control, bounds=bounds, seed=seed)
 
-    for outcome in BINARY_OUTCOMES:
+    for outcome in design.binary:
         if outcome not in frame.columns:
             continue
         rebuilt[outcome] = calibrate_binary(
-            frame, outcome, _target_effects(frame, outcome, targets), seed=seed
+            frame,
+            outcome,
+            _target_effects(frame, outcome, targets, control),
+            seed=seed,
+            control=control,
         ).astype(int)
 
-    rebuilt = align_trust_items(frame, rebuilt)
-    return rebuilt, _audit(frame, rebuilt, parts, targets, drift)
+    rebuilt = align_composites(frame, rebuilt, design)
+    return rebuilt, _audit(frame, rebuilt, parts, targets, drift, design)
 
 
 def _audit(
@@ -187,6 +247,7 @@ def _audit(
     parts: dict[str, Decomposition],
     targets: pd.DataFrame | None,
     drift: pd.DataFrame,
+    design: Instrument,
 ) -> pd.DataFrame:
     """Re-measure drift on the *finished* frame, not on the intermediate one.
 
@@ -200,16 +261,18 @@ def _audit(
     """
     rows = []
     for outcome in list(parts) + [
-        name for name in BINARY_OUTCOMES if name in rebuilt.columns
+        name for name in design.binary if name in rebuilt.columns
     ]:
-        wanted = _target_effects(original, outcome, targets)
-        realised = condition_effects(rebuilt, outcome, CONTROL)
+        wanted = _target_effects(original, outcome, targets, design.control)
+        realised = condition_effects(rebuilt, outcome, design.control)
         shared = realised.index.intersection(wanted.index)
         gap = (realised.loc[shared] - wanted.loc[shared]).abs()
         level_target = (
             parts[outcome].level
             if outcome in parts
-            else float(original.loc[original["condition"] == CONTROL, outcome].mean())
+            else float(
+                original.loc[original["condition"] == design.control, outcome].mean()
+            )
         )
         rows.append(
             {
@@ -219,7 +282,11 @@ def _audit(
                     float(gap.mean()) if len(gap) else float("nan")
                 ),
                 "level_drift": abs(
-                    float(rebuilt.loc[rebuilt["condition"] == CONTROL, outcome].mean())
+                    float(
+                        rebuilt.loc[
+                            rebuilt["condition"] == design.control, outcome
+                        ].mean()
+                    )
                     - level_target
                 ),
             }
@@ -246,8 +313,12 @@ def _audit(
     )
 
 
-def align_trust_items(original: pd.DataFrame, rebuilt: pd.DataFrame) -> pd.DataFrame:
-    """Shift the twelve trust items by whatever moved the composite.
+def align_composites(
+    original: pd.DataFrame,
+    rebuilt: pd.DataFrame,
+    design: Instrument | None = None,
+) -> pd.DataFrame:
+    """Shift each composite's items by whatever moved the composite.
 
     A uniform shift is the right correction rather than a convenience: the
     composite is the items' plain mean, so adding the same delta to each
@@ -258,21 +329,33 @@ def align_trust_items(original: pd.DataFrame, rebuilt: pd.DataFrame) -> pd.DataF
     from the clipped items afterwards, keeping the file internally consistent even
     where the requested shift was not fully representable.
     """
-    present = [item for item in TRUST_ITEMS if item in rebuilt.columns]
-    if "trust_multidimensional" not in rebuilt.columns or not present:
-        return rebuilt
+    design = design or pfander_instrument()
     out = rebuilt.copy()
-    target = out["trust_multidimensional"].to_numpy(float)
-    delta = target - original["trust_multidimensional"].to_numpy(float)
-    items = original[present].to_numpy(float) + delta[:, None]
-    moved = (
-        _shift_to_row_mean(items, target) if len(present) == len(TRUST_ITEMS) else items
-    )
-    for index, item in enumerate(present):
-        out[item] = np.clip(moved[:, index], 0.0, 100.0)
-    if len(present) == len(TRUST_ITEMS):
-        out["trust_multidimensional"] = out[present].mean(axis=1)
+    for composite, items in design.composites.items():
+        if composite not in out.columns:
+            continue
+        present = [item for item in items if item in out.columns]
+        if not present:
+            continue
+        target = out[composite].to_numpy(float)
+        delta = target - original[composite].to_numpy(float)
+        shifted = original[present].to_numpy(float) + delta[:, None]
+        complete = len(present) == len(items)
+        limit = scale_of(composite, design)
+        moved = (
+            _shift_to_row_mean(shifted, target, bounds=(0.0, limit))
+            if complete
+            else shifted
+        )
+        for index, item in enumerate(present):
+            out[item] = np.clip(moved[:, index], 0.0, limit)
+        if complete:
+            out[composite] = out[present].mean(axis=1)
     return out
+
+
+#: Kept as an alias: the Pfänder-only name this function used to have.
+align_trust_items = align_composites
 
 
 def _shift_to_row_mean(

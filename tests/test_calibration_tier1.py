@@ -201,3 +201,83 @@ def test_all_values_stay_inside_their_native_ranges():
     for outcome in OUTCOMES:
         assert calibrated[outcome].min() >= -1e-9
         assert calibrated[outcome].max() <= T1.scale_of(outcome) + 1e-9
+
+
+def other_study_instrument() -> T1.Instrument:
+    """A study with a different control label, different scales and no composite."""
+    return T1.Instrument(
+        scales={"attitude": 100.0, "support": 100.0, "spend": 20.0},
+        control="null_arm",
+        moderators=("party",),
+        binary=(),
+        composites={},
+    )
+
+
+def other_study_frame(n: int = 2000, seed: int = 21) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    frame = pd.DataFrame(
+        {
+            "condition": rng.choice(["null_arm", "treat"], size=n),
+            "party": rng.choice(["Republican", "Democrat"], size=n),
+        }
+    )
+    lift = np.where(frame["condition"] == "treat", 5.0, 0.0)
+    frame["attitude"] = np.clip(45 + lift + rng.normal(0, 15, n), 0, 100)
+    frame["support"] = np.clip(60 + lift + rng.normal(0, 18, n), 0, 100)
+    frame["spend"] = np.clip(8 + lift / 10 + rng.normal(0, 3, n), 0, 20)
+    return frame
+
+
+def test_calibrate_works_for_a_study_that_is_not_pfander():
+    """The path that validates a calibration must be the path that applies it.
+
+    This module was briefly hard-wired to Pfänder's control label, scale ranges
+    and trust battery, so a calibration could only be *validated* by calling the
+    layer underneath — which is exactly where a bug survives review.
+    """
+    design = other_study_instrument()
+    frame = other_study_frame()
+    targets = pd.DataFrame(
+        [
+            {
+                "outcome": outcome,
+                "condition": "treat",
+                "estimate": float(
+                    C.condition_effects(frame, outcome, "null_arm")["treat"]
+                )
+                * (100.0 / design.scales[outcome])
+                * 0.25,
+                "se": 1.0,
+            }
+            for outcome in design.outcomes
+        ]
+    )
+    calibrated, drift = T1.calibrate(frame, targets=targets, instrument=design)
+    assert (drift["max_abs_effect_drift"] < 1e-9).all()
+    for outcome in design.outcomes:
+        before = C.condition_effects(frame, outcome, "null_arm")["treat"]
+        after = C.condition_effects(calibrated, outcome, "null_arm")["treat"]
+        assert after == pytest.approx(before * 0.25, rel=1e-6)
+        assert calibrated[outcome].between(0, design.scales[outcome]).all()
+
+
+def test_a_level_anchor_works_on_another_study_too():
+    design = other_study_instrument()
+    frame = other_study_frame()
+    calibrated, drift = T1.calibrate(
+        frame, levels={"attitude": 70.0}, instrument=design
+    )
+    control = calibrated[calibrated.condition == "null_arm"]
+    assert control["attitude"].mean() == pytest.approx(70.0, abs=1e-6)
+    assert (drift["max_abs_effect_drift"] < 1e-9).all()
+
+
+def test_scale_conversion_uses_the_instrument_it_was_given():
+    """A 0-20 scale must not be converted with Pfänder's 0-10 donation range."""
+    design = other_study_instrument()
+    table = pd.DataFrame(
+        [{"outcome": "spend", "condition": "treat", "estimate": 10.0, "se": 1.0}]
+    )
+    converted = T1.pp_to_raw(table, instrument=design)["estimate"].iloc[0]
+    assert converted == pytest.approx(2.0)
