@@ -21,6 +21,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     build.add_argument("--seed", type=int, default=20260815)
     build.add_argument("--per-intervention", type=int, default=None)
+    build.add_argument(
+        "--out",
+        default=None,
+        help="where to write (default: the qwen25_7b run's profiles.csv)",
+    )
+    build.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="replace an existing profiles.csv; refused by default",
+    )
 
     sub.add_parser("render-templates", help="write data/Voelkel/text_templates")
 
@@ -102,9 +112,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "build-profiles":
+        # See the note in the Pfänder CLI: the default target is a finished run's
+        # provenance, so replacing it is opt-in rather than the default.
+        target = Path(args.out) if getattr(args, "out", None) else paths.PROFILES_CSV
+        if target.exists() and not getattr(args, "overwrite", False):
+            raise SystemExit(
+                f"{target} already exists and is a finished run's provenance; "
+                "pass --out to write elsewhere, or --overwrite to replace it"
+            )
         built = profiles.build(seed=args.seed, per_intervention=args.per_intervention)
-        profiles.write_csv(built, paths.PROFILES_CSV)
-        print(f"wrote {len(built)} profiles to {paths.PROFILES_CSV}")
+        profiles.write_csv(built, target)
+        print(f"wrote {len(built)} profiles to {target}")
         return 0
 
     if args.command == "render-templates":

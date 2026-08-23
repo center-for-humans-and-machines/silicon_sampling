@@ -59,6 +59,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     build.add_argument("--n", type=int, default=profiles.TOTAL_N)
     build.add_argument("--seed", type=int, default=20260814)
+    build.add_argument(
+        "--out",
+        default=None,
+        help="where to write (default: the qwen25_7b run's profiles.csv)",
+    )
+    build.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="replace an existing profiles.csv; refused by default",
+    )
 
     sample = sub.add_parser("sample", help="run the model over the profiles")
     sample.add_argument("--profiles", default=None)
@@ -165,9 +175,21 @@ def main(argv: list[str] | None = None) -> int:
         return validate.main()
 
     if args.command == "build-profiles":
+        # The default target sits inside a *finished* run's directory, and that
+        # file is the only record of which respondent a sampled transcript
+        # belongs to.  Silently replacing it would make a completed run
+        # unreproducible, and the schema now differs between a prefilled build
+        # and the ones on disk, so an accidental rerun would not even be a
+        # no-op.  Overwriting therefore has to be asked for.
+        target = Path(args.out) if args.out else paths.PROFILES_CSV
+        if target.exists() and not args.overwrite:
+            raise SystemExit(
+                f"{target} already exists and is a finished run's provenance; "
+                "pass --out to write elsewhere, or --overwrite to replace it"
+            )
         built = profiles.build(total=args.n, seed=args.seed)
-        profiles.write_csv(built, paths.PROFILES_CSV)
-        print(f"wrote {len(built)} profiles to {paths.PROFILES_CSV}")
+        profiles.write_csv(built, target)
+        print(f"wrote {len(built)} profiles to {target}")
         return 0
 
     if args.command == "sample":

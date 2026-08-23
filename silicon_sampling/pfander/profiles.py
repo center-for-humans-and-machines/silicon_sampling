@@ -11,10 +11,28 @@ i.e. age and race independent *given* gender, which is the maximum-entropy joint
 consistent with what was published.  That form is computed directly here; running
 IPF would only rediscover it.
 
-Only gender, age and race are pre-filled.  Education, income and party are also
-benchmark moderators, but the task fixes the pre-filled set to what the
-preregistration quotas cover, so the model generates those three and their
-marginals become a diagnostic rather than an input.
+The other three benchmark moderators — education, income and party — are not in
+the quotas, and letting the model invent them went badly: Qwen2.5-7B put 139 of
+18,000 respondents (0.77%) in ``Less than $30,000``, which is that moderator's
+dummy-coding reference level, so every income interaction was estimated against
+18 control-arm respondents against the benchmark's floor of 30.  They are now
+pre-filled too, from ``demographics.joint``: CCAM's
+``P(education, income, party | gender, age band, race)``, calibrated to 2024
+national levels.  The quota axes are untouched by that — this module still builds
+the cells the way it always has, and the draw only fills in the axes CCAM
+supplies — so the published gender x age and gender x race margins come out
+exactly as before, cell for cell.
+
+**Prefill is a property of the profiles file, not of this module.**  Three
+finished or running Pfänder runs read a ``profiles.csv`` written before any of
+this existed, and one of them is sampling right now.  So the drawn moderators are
+written as three extra *columns*: a file that has them was built with prefill on
+and its respondents are handed their education, income and party; a file that
+does not is read exactly as it always was and its respondents generate them.  No
+existing file changes meaning, and ``build(prefill=False)`` still reproduces one
+byte for byte, because the draw runs on its own seed stream rather than on the
+per-profile ``local`` one — drawing from ``local`` would shift every age,
+consensus order and per-profile seed downstream of it.
 """
 
 from __future__ import annotations
@@ -24,6 +42,7 @@ import random
 from dataclasses import asdict, dataclass, field
 from typing import Sequence
 
+from ..demographics import joint as demographics
 from . import instrument
 from .conditions import CONSENSUS_ORDERS, CONTROL_TEXTS, INTERVENTIONS
 from .outcomes import age_band
@@ -52,6 +71,23 @@ PER_INTERVENTION_N = 1000
 #: Age range each band spans.  The open-ended top band is capped at 89.
 BAND_RANGE = {"18-29": (18, 29), "30-44": (30, 44), "45-59": (45, 59), "60+": (60, 89)}
 
+#: Seed stream for the CCAM-drawn moderators.  Deliberately separate from the
+#: per-profile ``local`` stream: drawing from ``local`` would shift every value
+#: after it and stop the finished runs from reproducing their own profiles.csv.
+DEMOGRAPHIC_SEED = 20260823
+
+
+def demographic_answers(profile_id: str, gender: str, band: str, race: str) -> dict:
+    """Education, income and party for one quota cell, from ``demographics.joint``.
+
+    Keyed on the profile id rather than on a loop position, so a profile keeps its
+    moderators when the file is rebuilt and ``read_csv`` can check a stored value
+    against a fresh draw.  ``joint.Sampler.draw`` consumes exactly one float, so
+    the result is a pure function of the id and the cell.
+    """
+    rng = random.Random(DEMOGRAPHIC_SEED * 1_000_003 + int(profile_id[1:]))
+    return demographics.draw(gender, band, race, rng)
+
 
 @dataclass
 class Profile:
@@ -69,8 +105,23 @@ class Profile:
     consensus_order: str = ""
     post_order: str = ""
     seed: int = 0
+    #: The three moderators CCAM supplies.  Empty on a profile built before
+    #: prefill, which is how such a profile stays readable.
+    education: str = ""
+    income: str = ""
+    party: str = ""
     #: Answers supplied rather than sampled.
     prefilled: dict = field(default_factory=dict, repr=False)
+
+    @property
+    def drawn(self) -> dict[str, str]:
+        """The pre-filled moderators, or nothing when this profile has none."""
+        values = {
+            "education": self.education,
+            "income": self.income,
+            "party": self.party,
+        }
+        return {name: value for name, value in values.items() if value}
 
 
 def _largest_remainder(weights: dict, total: int) -> dict:
@@ -135,8 +186,16 @@ def condition_slots() -> list[str]:
     ]
 
 
-def build(total: int = TOTAL_N, seed: int = 20260814) -> list[Profile]:
-    """Construct every profile, deterministically."""
+def build(
+    total: int = TOTAL_N, seed: int = 20260814, prefill: bool = True
+) -> list[Profile]:
+    """Construct every profile, deterministically.
+
+    ``prefill=False`` leaves education, income and party for the model to
+    generate, which is what the finished runs did; the rest of the profile is
+    identical either way, so the two differ only in whether the three extra
+    columns are present.
+    """
     rng = random.Random(seed)
 
     cells: list[tuple[str, str, str]] = []
@@ -160,6 +219,8 @@ def build(total: int = TOTAL_N, seed: int = 20260814) -> list[Profile]:
     for index, ((gender, band, race), condition) in enumerate(
         zip(cells, assignments), start=1
     ):
+        profile_id = f"p{index:05d}"
+        drawn = demographic_answers(profile_id, gender, band, race) if prefill else {}
         local = random.Random(seed * 1_000_003 + index)
         weights = _age_weights(band)
         age = local.choices(list(weights), weights=list(weights.values()))[0]
@@ -169,7 +230,7 @@ def build(total: int = TOTAL_N, seed: int = 20260814) -> list[Profile]:
         local.shuffle(order)
         profiles.append(
             Profile(
-                profile_id=f"p{index:05d}",
+                profile_id=profile_id,
                 condition=condition,
                 code_name=(
                     control_text if condition == "control" else CODE_NAMES[condition]
@@ -185,22 +246,37 @@ def build(total: int = TOTAL_N, seed: int = 20260814) -> list[Profile]:
                 ),
                 post_order="|".join(order),
                 seed=local.randrange(2**31),
-                prefilled={
-                    "filter": "Yes",
-                    "filter_ai": "Yes",
-                    "gender": gender,
-                    "year_birth": year,
-                    "race": race,
-                    # Every respondent in the human sample passed both checks.
-                    "attention1": 3,
-                    "attention2": "attention",
-                },
+                **drawn,
+                prefilled=prefilled_answers(gender, year, race, drawn),
             )
         )
     return profiles
 
 
-FIELDS = (
+def prefilled_answers(gender: str, year_birth: int, race: str, drawn: dict) -> dict:
+    """Answers supplied rather than sampled.
+
+    Consent, the AI screener and both attention checks are pre-filled as passed:
+    every respondent in the human sample passed them, so sampling them would
+    create a selection effect with no counterpart in the target data.  The quota
+    axes are pre-filled because the quotas are the sample definition, and the
+    three in ``drawn`` because CCAM knows their joint distribution and a base
+    model does not.
+    """
+    return {
+        "filter": "Yes",
+        "filter_ai": "Yes",
+        "gender": gender,
+        "year_birth": year_birth,
+        "race": race,
+        "attention1": 3,
+        "attention2": "attention",
+        **drawn,
+    }
+
+
+#: Columns every ``profiles.csv`` has carried since the first run.
+BASE_FIELDS = (
     "profile_id",
     "condition",
     "code_name",
@@ -215,11 +291,25 @@ FIELDS = (
     "seed",
 )
 
+#: The CCAM-drawn moderators.  Written only when the profiles carry them, so a
+#: file's header is what distinguishes a prefilled run from an older one.
+DEMOGRAPHIC_FIELDS = ("education", "income", "party")
+
+FIELDS = BASE_FIELDS + DEMOGRAPHIC_FIELDS
+
+
+def fieldnames(profiles: Sequence[Profile]) -> tuple[str, ...]:
+    """The columns a set of profiles writes: the three extras only if they exist."""
+    if any(profile.drawn for profile in profiles):
+        return FIELDS
+    return BASE_FIELDS
+
 
 def write_csv(profiles: Sequence[Profile], path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    columns = fieldnames(profiles)
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=FIELDS)
+        writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
         for profile in profiles:
             row = asdict(profile)
@@ -228,6 +318,15 @@ def write_csv(profiles: Sequence[Profile], path) -> None:
 
 
 def read_csv(path) -> list[Profile]:
+    """Load profiles, pre-filling the CCAM moderators only if the file has them.
+
+    This is the whole compatibility story.  ``education``/``income``/``party`` are
+    read with ``.get`` and default to empty, so the three ``profiles.csv`` files
+    written before prefill existed load with exactly the answers they always had
+    and their respondents keep generating those three items.  A run is therefore
+    identified by its own profiles file rather than by the version of this module
+    that happens to be checked out.
+    """
     with path.open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
     profiles = []
@@ -245,15 +344,10 @@ def read_csv(path) -> list[Profile]:
             consensus_order=row["consensus_order"],
             post_order=row["post_order"],
             seed=int(row["seed"]),
+            **{name: row.get(name, "") for name in DEMOGRAPHIC_FIELDS},
         )
-        profile.prefilled = {
-            "filter": "Yes",
-            "filter_ai": "Yes",
-            "gender": profile.gender,
-            "year_birth": profile.year_birth,
-            "race": profile.race,
-            "attention1": 3,
-            "attention2": "attention",
-        }
+        profile.prefilled = prefilled_answers(
+            profile.gender, profile.year_birth, profile.race, profile.drawn
+        )
         profiles.append(profile)
     return profiles

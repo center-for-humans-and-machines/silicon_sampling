@@ -13,6 +13,13 @@ MODELS = {
     "qwen25_7b": "Qwen/Qwen2.5-7B",
     "qwen25_72b": "Qwen/Qwen2.5-72B",
     "v4_flash": "deepseek-ai/DeepSeek-V4-Flash-Base",
+    # Generation replicates: the same respondents with the same demographics, drawn
+    # again from offset seeds.  Averaging a replicate with its parent halves our own
+    # sampling noise, which is what attenuates the pooled correlation the benchmark
+    # sorts on -- a separate lever from averaging across *models*, and a safer one,
+    # since it cannot import a worse model's ordering.
+    "qwen25_7b_seed2": "Qwen/Qwen2.5-7B",
+    "qwen25_72b_seed2": "Qwen/Qwen2.5-72B",
 }
 
 #: Human-readable names for report tables and plot legends.
@@ -20,6 +27,8 @@ LABELS = {
     "qwen25_7b": "Qwen2.5-7B",
     "qwen25_72b": "Qwen2.5-72B",
     "v4_flash": "DeepSeek-V4-Flash",
+    "qwen25_7b_seed2": "Qwen2.5-7B (replicate)",
+    "qwen25_72b_seed2": "Qwen2.5-72B (replicate)",
 }
 
 #: The run every existing path and report already refers to.

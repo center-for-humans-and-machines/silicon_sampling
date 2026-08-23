@@ -159,6 +159,88 @@ def test_profiles_reproduce_the_preregistered_quotas():
     assert [p.age for p in built] == [p.age for p in again]
 
 
+def test_prefill_hands_over_the_three_moderators_the_quotas_do_not_cover():
+    """A pre-filled moderator must be *given* to the respondent, not asked of them.
+
+    The mechanism is indirect enough to be worth a test: education, income and
+    party are declared ``source="generated"`` in the instrument, and what makes
+    them pre-filled is only that ``Session`` skips a slot whose id is already in
+    ``answers``.  So the same instrument serves both runs, and which one a
+    respondent is in is decided entirely by what their profile carries.
+    """
+    from silicon_sampling.pfander.run import session_for
+
+    filled = profiles.build(prefill=True)
+    plain = profiles.build(prefill=False)
+
+    for profile in filled[:5]:
+        assert profile.drawn.keys() == {"education", "income", "party"}
+        session = session_for(profile)
+        while (step := session.next_prompt()) is not None:
+            _, slot = step
+            session.submit(slot, validate._dummy(slot))
+        for name, value in profile.drawn.items():
+            assert name not in session.asked, f"{name} was asked despite being given"
+            assert session.answers[name] == value
+        # The answer has to reach the transcript, or the respondent never sees it.
+        assert f"Response: {profile.income}" in session.transcript()
+
+    for profile in plain[:5]:
+        assert profile.drawn == {}
+        session = session_for(profile)
+        while (step := session.next_prompt()) is not None:
+            _, slot = step
+            session.submit(slot, validate._dummy(slot))
+        for name in ("education", "income", "party"):
+            assert name in session.asked, f"{name} must still be generated"
+
+
+def test_a_profiles_file_without_the_drawn_columns_still_loads_unchanged():
+    """The compatibility contract three finished runs depend on.
+
+    Their ``profiles.csv`` predates prefill, so it has to keep meaning what it
+    meant: twelve columns, seven pre-filled answers, and education, income and
+    party generated.  ``build(prefill=False)`` still writes exactly that file, and
+    the three extra columns are the only thing prefill adds.
+    """
+    import tempfile
+    from pathlib import Path
+
+    scratch = Path(tempfile.mkdtemp())
+    old = scratch / "old.csv"
+    new = scratch / "new.csv"
+    profiles.write_csv(profiles.build(prefill=False), old)
+    profiles.write_csv(profiles.build(prefill=True), new)
+
+    assert old.read_text(encoding="utf-8").splitlines()[0] == ",".join(
+        profiles.BASE_FIELDS
+    )
+    assert new.read_text(encoding="utf-8").splitlines()[0] == ",".join(profiles.FIELDS)
+    assert profiles.FIELDS == profiles.BASE_FIELDS + profiles.DEMOGRAPHIC_FIELDS
+
+    loaded = profiles.read_csv(old)
+    assert all(profile.drawn == {} for profile in loaded)
+    assert sorted(loaded[0].prefilled) == [
+        "attention1",
+        "attention2",
+        "filter",
+        "filter_ai",
+        "gender",
+        "race",
+        "year_birth",
+    ]
+    reloaded = profiles.read_csv(new)
+    assert [p.drawn for p in reloaded] == [
+        p.drawn for p in profiles.build(prefill=True)
+    ]
+
+    # And any run already on disk is still exactly what this module writes.
+    for path in sorted(Path("data/pfander/silicon_sampling").glob("*/profiles.csv")):
+        header = path.read_text(encoding="utf-8").splitlines()[0]
+        assert header == ",".join(profiles.BASE_FIELDS), path
+        assert all(profile.drawn == {} for profile in profiles.read_csv(path)), path
+
+
 def test_age_band_boundaries():
     assert outcomes.age_band(2026 - 18) == "18-29"
     assert outcomes.age_band(2026 - 29) == "18-29"
