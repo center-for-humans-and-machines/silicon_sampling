@@ -43,6 +43,7 @@ from typing import Sequence
 
 from ..survey.elements import Block as TranscriptBlock
 from ..survey.elements import Text
+from ..survey.slots import Slot
 from ..voelkel.qsf import Survey, load_survey
 from . import convert as cv
 from .paths import MASTER_QSF, arm_qsf
@@ -439,19 +440,44 @@ def flow_embedded(path) -> dict[str, str]:
     return values
 
 
-def slot_index(state: Loaded, prefix: str) -> dict[str, str]:
+@lru_cache(maxsize=64)
+def slot_index(stem: str, prefix: str) -> dict[str, str]:
     """QID -> slot id, so a piped *answer* can name the slot it echoes.
 
     One arm quotes the respondent's own guess back at them — "You guessed 32% …
     the actual number is 18%" — as ``${q://QID.../ChoiceGroup/...}``.  Without
     this the echo renders as a bare question id, which is a token sequence nobody
     ever saw on screen.
+
+    The id is read off the slot :func:`~silicon_sampling.goldwert.convert.convert_question`
+    actually emits rather than recomputed from the export tag, because computing
+    it a second way is how an echo comes to name a slot that does not exist.  The
+    two rules parted on multi-row text entry: Qualtrics suffixes such a tag with
+    the row key and the converter follows it, while a hand-written "sliders,
+    matrices and constant sums take the key" rule did not — so
+    ``IndStructuralChange``'s three "You guessed …%" screens echoed
+    ``..._genderQ`` while the answer sat under ``..._genderQ_6``, and the session
+    raised ``KeyError`` the moment it tried to render the page.  A template render
+    cannot see this, because a template prints the marker instead of resolving it;
+    only driving a session does.  Cached per export because it now converts every
+    question in the file to find out.
     """
+    state = arm_survey(stem)
     index: dict[str, str] = {}
     for qid, question in state.survey.questions.items():
-        rows = cv._rows(state.payloads.get(qid, {}))
-        key = rows[0][0] if question.kind in {"Slider", "Matrix", "CS"} else ""
-        index[qid] = f"{prefix}{cv.published_column(cv.export_column(question, key))}"
+        payload = state.payloads.get(qid, {})
+        produced = cv.convert_question(question, payload, state.survey)
+        emitted = next(
+            (element.id for element in produced if isinstance(element, Slot)), None
+        )
+        if emitted is None:
+            # A display-only question records nothing, so nothing can echo it;
+            # the export tag is kept so the pipe still renders as *something*
+            # traceable rather than as a raw QID.
+            rows = cv._rows(payload)
+            key = rows[0][0] if question.kind in {"Slider", "Matrix", "CS"} else ""
+            emitted = cv.published_column(cv.export_column(question, key))
+        index[qid] = f"{prefix}{emitted}"
     return index
 
 
@@ -490,7 +516,7 @@ def arm_elements(arm: Arm, rng: random.Random | None = None) -> list:
             items,
             prefix=f"{arm.slug}__",
             embedded=embedded,
-            qid_to_slot=slot_index(state, f"{arm.slug}__"),
+            qid_to_slot=slot_index(arm.qsf, f"{arm.slug}__"),
         )
         if not converted.elements:
             continue
@@ -505,7 +531,7 @@ def arm_elements(arm: Arm, rng: random.Random | None = None) -> list:
                 items,
                 prefix=f"{arm.slug}__{key}__",
                 embedded=embedded,
-                qid_to_slot=slot_index(state, f"{arm.slug}__{key}__"),
+                qid_to_slot=slot_index(arm.qsf, f"{arm.slug}__{key}__"),
             )
         seen |= set(converted.data_columns)
         out.append(

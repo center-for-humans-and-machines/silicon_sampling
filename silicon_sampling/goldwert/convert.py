@@ -217,6 +217,52 @@ def display_condition(payload: dict, survey: Survey, prefix: str = "") -> str | 
     return f'{prefix}{export_column(source)} = "{answer}"'
 
 
+#: Minus signs a respondent might type.  Qualtrics renders the scale with an
+#: ASCII hyphen, but a model writing prose reaches for the typographic ones.
+_MINUS = ("-", "\u2212", "\u2013", "\u2014")
+
+
+@dataclass(frozen=True)
+class SignedIntSlot(IntSlot):
+    """A slider whose scale runs through zero, so half its range is negative.
+
+    The shared :class:`~silicon_sampling.survey.slots.IntSlot` matches an answer
+    with ``\\d+`` and therefore cannot parse ``"-40"`` at all.  On a 0-100 slider
+    that is correct — a minus sign there is not an answer.  On the one bipolar
+    item in this instrument it silently made the entire negative half of the scale
+    illegal: every draw below the midpoint was rejected, the sampler burned its
+    four rounds and its grammar fallback on each one, and the forced default
+    landed on the exact midpoint.  A respondent who felt negative about the
+    stories could not say so.
+
+    Fixed here rather than in the shared slot because the shared module serves
+    three other studies and none of them has a scale like this; the sign handling
+    is this instrument's problem, so it lives with this instrument's converter.
+    The prose line has to change too: the project's slider convention states the
+    endpoint *labels* and no numbers, which leaves a model with no way to know a
+    minus sign is permitted, so this slot says the range out loud.
+    """
+
+    def describe(self) -> str:
+        stated = (
+            f"Whole number from {self.lo} to {self.hi}; negative answers are allowed."
+        )
+        return f"{self.anchors}  {stated}" if self.anchors else stated
+
+    def parse(self, raw: str):
+        text = raw.split("\n", 1)[0].strip()
+        sign = 1
+        for mark in _MINUS:
+            if text.startswith(mark):
+                sign, text = -1, text[len(mark) :].lstrip()
+                break
+        magnitude = super().parse(text)
+        if magnitude is None:
+            return None
+        value = sign * magnitude
+        return value if self.lo <= value <= self.hi else None
+
+
 def _slider_slots(question: Question, payload: dict, prompt: str) -> list[Slot]:
     lo, hi = slider_bounds(payload)
     config = payload.get("Configuration") or {}
@@ -239,8 +285,9 @@ def _slider_slots(question: Question, payload: dict, prompt: str) -> list[Slot]:
             # its own; quoting it again would compound the mess, so it is
             # normalised to a bare parenthetical.
             described += "  Or answer: Not Applicable."
+        kind = SignedIntSlot if lo < 0 else IntSlot
         slots.append(
-            IntSlot(
+            kind(
                 id=published_column(export_column(question, key)),
                 prompt=prompt if len(rows) == 1 else f"{prompt} — {label}",
                 anchors=described,
@@ -250,6 +297,24 @@ def _slider_slots(question: Question, payload: dict, prompt: str) -> list[Slot]:
             )
         )
     return slots
+
+
+def one_line(text: str) -> str:
+    """Collapse a choice label onto a single line.
+
+    Not cosmetic.  A response line in this transcript format holds the answer and
+    nothing else, so :class:`~silicon_sampling.survey.slots.ChoiceSlot` truncates
+    a draw at the first newline before matching it — which means an option whose
+    own label *contains* a newline can never be matched, and rejection sampling
+    then rejects that option one hundred per cent of the time.  Seven options of
+    ``ThreatInjustEfficacy``'s fairness item arrived that way, each stored in
+    Qualtrics as ``"Completely unfair <br> 1"``, and the whole seven-point scale
+    was unanswerable: the sampler would have exhausted its rounds on every one of
+    them and recorded the forced default instead.  The template file shows the
+    damage plainly — its ``Options:`` line runs down eight rows — which is why this
+    is fixed where the label is built rather than papered over at parse time.
+    """
+    return " ".join(str(text).split())
 
 
 def _rows(payload: dict) -> list[tuple[str, str]]:
@@ -270,6 +335,88 @@ def _rows(payload: dict) -> list[tuple[str, str]]:
 #: validates it as a number without stating bounds; the authors' cleaning script
 #: keeps 18 to 100 and discards the rest, so those are the legal answers.
 NUMERIC_TEXT_RANGE = (18, 100)
+
+
+def custom_validation_bounds(payload: dict) -> tuple[int, int] | None:
+    """Numeric bounds a question states through Qualtrics ``CustomValidation``.
+
+    Read rather than assumed.  Only a question that declares *both* a
+    ``GreaterThanOrEqual`` and a ``LessThanOrEqual`` clause gets bounds out of
+    here, so a question the survey did not bound stays free text instead of being
+    silently given a range nobody wrote down.
+    """
+    logic = ((payload.get("Validation") or {}).get("Settings") or {}).get(
+        "CustomValidation"
+    )
+    if not isinstance(logic, dict):
+        return None
+    found: dict[str, str] = {}
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            operator, right = node.get("Operator"), node.get("RightOperand")
+            if operator in {"GreaterThanOrEqual", "LessThanOrEqual"} and right not in (
+                None,
+                "",
+            ):
+                found[operator] = str(right)
+            for child in node.values():
+                walk(child)
+        elif isinstance(node, list):
+            for child in node:
+                walk(child)
+
+    walk(logic)
+    try:
+        return int(found["GreaterThanOrEqual"]), int(found["LessThanOrEqual"])
+    except (KeyError, ValueError):
+        return None
+
+
+def row_numeric_range(payload: dict, row_key: str) -> tuple[int, int] | None:
+    """Bounds for one row of a text-entry *form* that asks for a number.
+
+    A single-box text entry declares its validation once, in
+    ``Validation.Settings.ContentType``, which is what :func:`_numeric_range`
+    reads.  A *form* declares it per row, in
+    ``Choices[key]["TextEntryValidation"]`` — and missing that turned the three
+    "What percentage of Americans …?" boxes of ``IndStructuralChange`` into
+    free-text slots.  The consequence was not cosmetic: each of those three
+    answers is echoed back on the *next* screen as "You guessed <answer>% of
+    people believe …", so a prose answer produced a sentence reading "You guessed
+    I want you to take climate change seriously and vote for policies…% of people
+    believe…".  A template render cannot show this, because a template prints the
+    echo marker instead of resolving it; only driving a session does.
+    """
+    choices = payload.get("Choices")
+    if not isinstance(choices, dict):
+        return None
+    row = choices.get(str(row_key)) or {}
+    if not str(row.get("TextEntryValidation") or "").startswith("ValidNumber"):
+        return None
+    return custom_validation_bounds(payload)
+
+
+def _form_row_slot(question: Question, payload: dict, key: str, label: str) -> Slot:
+    """One row of a text-entry form: a number if the survey validated it as one."""
+    bounds = row_numeric_range(payload, key)
+    if bounds is None:
+        return FreeTextSlot(
+            id=published_column(export_column(question, key)),
+            prompt=label,
+            hint="Free text.",
+            max_tokens=80,
+            max_chars=600,
+        )
+    lo, hi = bounds
+    return IntSlot(
+        id=published_column(export_column(question, key)),
+        prompt=label,
+        anchors=f"Whole number from {lo} to {hi}.",
+        lo=lo,
+        hi=hi,
+        max_tokens=6,
+    )
 
 
 def _numeric_range(payload: dict) -> tuple[int, int] | None:
@@ -331,7 +478,7 @@ def convert_question(
 
     if question.kind == "Matrix":
         # Rows are the statements, the shared answer scale is the option list.
-        options = tuple(s for s in question.statements if s)
+        options = tuple(one_line(s) for s in question.statements if s)
         if not options:
             return notes + ([Text(prompt)] if prompt.strip() else [])
         return (
@@ -349,7 +496,7 @@ def convert_question(
         )
 
     if question.kind == "MC":
-        options = tuple(o for o in question.choices if o)
+        options = tuple(one_line(o) for o in question.choices if o)
         if not options:
             return notes + ([Text(prompt)] if prompt.strip() else [])
         multi = question.selector.startswith("MA")
@@ -393,16 +540,7 @@ def convert_question(
         return (
             notes
             + ([Text(prompt)] if prompt.strip() else [])
-            + [
-                FreeTextSlot(
-                    id=published_column(export_column(question, key)),
-                    prompt=label,
-                    hint="Free text.",
-                    max_tokens=80,
-                    max_chars=600,
-                )
-                for key, label in rows
-            ]
+            + [_form_row_slot(question, payload, key, label) for key, label in rows]
         )
 
     return notes + ([Text(prompt)] if prompt.strip() else [])

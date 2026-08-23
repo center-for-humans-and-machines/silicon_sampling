@@ -7,7 +7,7 @@
 # and a stray pkill would be aimed at the wrong thing.  So this wrapper only
 # retries; the sampler's own resumability does the rest.
 #
-# Usage: scripts/run_cluster_sample.sh <pfander|voelkel> <run_key> <target_n> [extra sampler args...]
+# Usage: scripts/run_cluster_sample.sh <pfander|voelkel|icpc|goldwert> <run_key> <target_n> [extra sampler args...]
 #
 # Called from a slurm job as, e.g.:
 #   -c pass; bash scripts/run_cluster_sample.sh pfander v4_flash 18000 \
@@ -15,7 +15,7 @@
 
 set -u
 
-STUDY="${1:?study: pfander or voelkel}"
+STUDY="${1:?study: pfander, voelkel, icpc or goldwert}"
 RUN="${2:?run key, e.g. v4_flash}"
 TARGET="${3:?target respondent count}"
 shift 3
@@ -23,9 +23,15 @@ shift 3
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# The directory case is the only per-study knowledge in this wrapper: the CLI
+# module path is "silicon_sampling.<study>.cli" for all four, and every one of them
+# accepts the same --run and writes answers.jsonl one line per finished respondent,
+# which is what the retry loop below counts.
 case "$STUDY" in
-    pfander) OUT="$ROOT/data/pfander/silicon_sampling/$RUN" ;;
-    voelkel) OUT="$ROOT/data/Voelkel/silicon_sampling/$RUN" ;;
+    pfander)  OUT="$ROOT/data/pfander/silicon_sampling/$RUN" ;;
+    voelkel)  OUT="$ROOT/data/Voelkel/silicon_sampling/$RUN" ;;
+    icpc)     OUT="$ROOT/data/ICPC/silicon_sampling/$RUN" ;;
+    goldwert) OUT="$ROOT/data/Goldwert/silicon_sampling/$RUN" ;;
     *) echo "unknown study: $STUDY" >&2; exit 2 ;;
 esac
 LOG="$OUT/sample.log"

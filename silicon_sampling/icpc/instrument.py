@@ -174,6 +174,12 @@ DV_BLOCKS: tuple[str, ...] = ("belief", "policy", "sharing")
 #: The two control-only extra blocks, also shuffled.
 CONTROL_EXTRA_BLOCKS: tuple[str, ...] = ("control_ivs", "terms_probing")
 
+#: How many wordings of the terms-probing item Qualtrics draws between.  Read off
+#: the item list rather than restated, because the sampler has to visit all nine
+#: (each is its own slot id and its own column) and a count that disagreed with
+#: the list would silently leave one wording unbudgeted and one column absent.
+PROBE_WORDINGS: int = len(shared.TERMS_PROBING_ITEMS)
+
 #: ``.qsf`` blocks the control-only extras come from, for the modality audit.
 CONTROL_EXTRA_QSF = (
     "1. Control Condition IVs",

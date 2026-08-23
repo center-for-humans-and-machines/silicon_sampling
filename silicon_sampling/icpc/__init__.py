@@ -17,10 +17,12 @@ from __future__ import annotations
 
 __all__ = [
     "convert",
+    "export",
     "instrument",
     "outcomes",
     "paths",
     "profiles",
+    "run",
     "score",
     "templates",
 ]

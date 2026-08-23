@@ -34,19 +34,44 @@ from __future__ import annotations
 
 import csv
 import json
+import random
 import re
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
 from silicon_sampling.icpc import convert
+from silicon_sampling.icpc import export
+
+# Aliased: an existing test below binds ``run`` as a loop variable.
+from silicon_sampling.icpc import run as icpc_run
 from silicon_sampling.icpc import instrument as inst
 from silicon_sampling.icpc import outcomes as oc
 from silicon_sampling.icpc import paths, profiles
 from silicon_sampling.icpc import templates as tpl
 from silicon_sampling.icpc import validate
 from silicon_sampling.icpc.images import IMAGE_ALT
+from silicon_sampling.icpc import cli as icpc_cli
+from silicon_sampling.sampling.tokens import verify
 from silicon_sampling.survey.render import MARKER_RE, render_template, slot_manifest
+
+#: Model whose tokenizer the sampling checks below measure with.  The weights are
+#: never loaded -- only the tokenizer -- and the checks skip themselves when even
+#: that is not cached locally, which is how the suite stays runnable in a checkout
+#: without a model.
+TOKENIZER_MODEL = "Qwen/Qwen2.5-7B"
+
+
+def _tokenizer(model: str = TOKENIZER_MODEL):
+    try:
+        from silicon_sampling.sampling.tokens import load_tokenizer
+
+        return load_tokenizer(model)
+    except Exception as error:  # pragma: no cover - depends on the local cache
+        print(f"  (skipped: no tokenizer for {model}: {type(error).__name__})")
+        return None
+
 
 requires_qsf = pytest.mark.skipif(
     not paths.QSF.exists(), reason="instrument .qsf not vendored"
@@ -714,3 +739,216 @@ def test_the_ideology_weights_are_ten_point_bins_not_deciles():
     assert len(profiles.IDEOLOGY_BINS) == 10
     assert abs(sum(profiles.IDEOLOGY_BINS) - 1) < 1e-3
     assert max(profiles.IDEOLOGY_BINS) > 0.2
+
+
+# --------------------------------------------------------------------------- #
+# the sampling run
+# --------------------------------------------------------------------------- #
+#
+# These drive the *real* runner with a stand-in generator.  What they are for is
+# the class of break that only a session can show: a rendered template prints a
+# marker where a session has to resolve it, so an echo naming a slot that does
+# not exist, or an option whose own label the parser will not accept, renders
+# perfectly and then fails on the GPU after the time has been spent.
+
+
+class _StubEngine:
+    """Answers whatever the pending slot accepts, with no model behind it.
+
+    Prompts arrive as token ids, so the pending slot is recovered by *position*:
+    :func:`~silicon_sampling.sampling.driver.run_group` builds its pending list in
+    session order and hands ``generate`` the prompts in that same order.  The
+    positional assumption holds only while every slot resolves in the first round,
+    which is exactly the property being asserted — a slot that rejects its own
+    legal answer trips the length assertion below rather than passing quietly.
+    """
+
+    def __init__(self, config):
+        self.config = config
+        self.sessions = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return None
+
+    def kv_cache_tokens(self):
+        return 500_000
+
+    def group_size_for(self, tokens_per_session, safety=0.95, cap=128):
+        return max(1, min(cap, int(500_000 * safety // tokens_per_session)))
+
+    def params(self, *, max_tokens, n, seed, structured=None):
+        return SimpleNamespace(max_tokens=max_tokens, n=n, seed=seed)
+
+    def generate(self, prompts, params):
+        pending = [s for s in self.sessions if s.next_prompt() is not None]
+        assert len(pending) == len(prompts), (
+            "a slot did not resolve in the first round, which means it rejects "
+            "its own legal answers"
+        )
+        out = []
+        for session, param in zip(pending, params):
+            slot = session.next_prompt()[1]
+            legal = str(validate.answer(slot, random.Random(param.seed)))
+            draws = [legal] * param.n
+            # One call in seven gets an illegal first draw, so the rejection
+            # accounting and the draw log are exercised too.
+            if param.seed % 7 == 0:
+                draws[0] = "Yes | No | Not applicable"
+            out.append(draws)
+        return out
+
+
+def _stub_sample(out_dir, profile_list, group_size=4):
+    """Run the study's own Runner over ``profile_list`` with the stub engine."""
+    from silicon_sampling.icpc.run import Runner
+    from silicon_sampling.sampling import runner as runner_mod
+    from silicon_sampling.sampling.driver import SamplerConfig
+    from silicon_sampling.sampling.driver import run_group as real_run_group
+    from silicon_sampling.sampling.engine import EngineConfig
+
+    def wrapped(engine, sessions, *args, **kwargs):
+        engine.sessions = sessions
+        return real_run_group(engine, sessions, *args, **kwargs)
+
+    # Budgets are supplied so the run needs no tokenizer when none is cached; with
+    # one, prompts go as ids and the incremental tokeniser is exercised too.
+    tokenizer = _tokenizer()
+    budgets = (
+        icpc_run.fit_token_budgets(TOKENIZER_MODEL)
+        if tokenizer is not None
+        else {
+            slot_id: slot.max_tokens for slot_id, slot in icpc_run.all_slots().items()
+        }
+    )
+    saved = runner_mod.VLLMEngine, runner_mod.run_group
+    runner_mod.VLLMEngine, runner_mod.run_group = _StubEngine, wrapped
+    try:
+        runner = Runner(
+            out_dir,
+            EngineConfig(model=TOKENIZER_MODEL),
+            SamplerConfig(
+                group_size=group_size,
+                draws_per_call=4,
+                token_id_prompts=tokenizer is not None,
+                max_tokens_by_slot=budgets,
+            ),
+        )
+        return runner.run(profile_list)
+    finally:
+        runner_mod.VLLMEngine, runner_mod.run_group = saved
+
+
+def test_every_arm_can_be_sampled_and_exported(tmp_path):
+    """One respondent per arm, all the way to samples.csv."""
+    built = profiles.build(seed=7, per_arm=1)
+    meta = _stub_sample(tmp_path, built)
+    assert meta["sampled"] == len(inst.ARMS)
+    # Nothing was forced and nothing needed a grammar: every slot took a legal
+    # answer on the first round.
+    assert meta["draws"]["forced"] == 0
+    assert meta["draws"]["structured_fallbacks"] == 0
+    assert 0 < meta["draws"]["rejected"] < meta["draws"]["draws"]
+
+    for path in ("answers.jsonl", "draws.jsonl", "run_meta.json"):
+        assert (tmp_path / path).exists(), path
+    # One transcript per respondent, filed under its arm's own slug.
+    written = sorted(
+        p.relative_to(tmp_path / "raw") for p in (tmp_path / "raw").rglob("*.txt")
+    )
+    assert len(written) == len(inst.ARMS)
+    assert {p.parent.name for p in written} == {arm.slug for arm in inst.ARMS}
+
+    summary = export.build_csvs(tmp_path)
+    assert summary["rows"] == len(inst.ARMS)
+    assert summary["arms"] == len(inst.ARMS)
+    frame = pd.read_csv(tmp_path / "samples.csv")
+    assert list(frame.columns)[-len(oc.OUTCOMES) :] == list(oc.OUTCOMES)
+    for name in oc.OUTCOMES:
+        assert frame[name].notna().any(), name
+
+
+def test_no_transcript_carries_a_marker_or_an_unanswered_response(tmp_path):
+    _stub_sample(tmp_path, profiles.build(seed=11, per_arm=1))
+    for path in (tmp_path / "raw").rglob("*.txt"):
+        text = path.read_text(encoding="utf-8")
+        assert MARKER_RE.search(text) is None, path
+        assert "\nResponse: \n" not in text and not text.endswith("Response: \n"), path
+
+
+def test_the_run_resumes_from_the_answer_log(tmp_path):
+    built = profiles.build(seed=13, per_arm=1)
+    first = _stub_sample(tmp_path, built[:4])
+    assert first["sampled"] == 4
+    again = _stub_sample(tmp_path, built)
+    assert (again["skipped"], again["sampled"]) == (4, len(built) - 4)
+    assert len((tmp_path / "answers.jsonl").read_text().strip().splitlines()) == len(
+        built
+    )
+
+
+def test_a_torn_final_record_is_truncated_before_anything_is_appended(tmp_path):
+    built = profiles.build(seed=17, per_arm=1)
+    _stub_sample(tmp_path, built[:2])
+    with (tmp_path / "answers.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write('{"profile_id": "iTORN", "cond')
+    _stub_sample(tmp_path, built[:4])
+    ids = [
+        json.loads(line)["profile_id"]
+        for line in (tmp_path / "answers.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert ids == [p.profile_id for p in built[:4]]
+
+
+def test_the_moderator_columns_speak_the_human_frames_vocabulary(tmp_path):
+    """A subgroup table intersects levels; two vocabularies would intersect to nothing."""
+    _stub_sample(tmp_path, profiles.build(seed=19, per_arm=1))
+    export.build_csvs(tmp_path)
+    frame = pd.read_csv(tmp_path / "samples.csv")
+    from silicon_sampling.icpc import score as sc
+
+    for moderator in sc.VISIBLE_MODERATORS:
+        assert moderator in frame.columns, moderator
+        levels = set(frame[moderator].dropna())
+        assert levels, moderator
+    assert set(frame["education"].dropna()) <= set(sc.EDUCATION_LABELS.values())
+    assert set(frame["income_band"].dropna()) <= set(sc.INCOME_BANDS.values())
+    assert set(frame["ideology_band"].dropna()) <= set(sc.IDEOLOGY_BREAKS[1])
+    assert set(frame["age_band"].dropna()) <= set(sc.AGE_BREAKS[1])
+
+
+def test_every_item_column_is_a_slot_and_no_echo_leaks_into_the_frame():
+    """Echo-only keys are inputs, not responses, and must not become columns."""
+    columns = export.item_columns()
+    assert len(columns) == len(set(columns))
+    assert set(columns) == set(icpc_run.all_slots())
+    for leaked in ("panel_gender", "panel_age", "profile_id", "cond"):
+        assert leaked not in columns
+
+
+def test_the_worst_case_transcript_fits_the_context_the_cli_asks_for():
+    """A cap below the longest arm does not slow the run down, it breaks it."""
+    tokenizer = _tokenizer()
+    if tokenizer is None:
+        return
+    longest = icpc_run.max_transcript_tokens(TOKENIZER_MODEL)
+    assert longest < icpc_cli.MAX_MODEL_LEN, (longest, icpc_cli.MAX_MODEL_LEN)
+    # And it is genuinely long: a cap sized for the Pfaender instrument would not
+    # hold this one, which is the mistake this guards against.
+    assert longest > 8192
+
+
+def test_transcripts_tokenise_incrementally():
+    """Submitting ids instead of text must be byte-identical, or the run is a lie."""
+    tokenizer = _tokenizer()
+    if tokenizer is None:
+        return
+    for session in icpc_run.worst_case_sessions():
+        prompts = []
+        while (step := session.next_prompt()) is not None:
+            prompts.append(step[0])
+            session.submit(step[1], icpc_run.widest_answer(step[1]))
+        verify(tokenizer, prompts)
