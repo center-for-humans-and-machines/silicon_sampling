@@ -170,6 +170,7 @@ def recompose(
     control: str,
     bounds: tuple[float, float] | None = (0.0, 100.0),
     seed: int = 0,
+    donors: np.ndarray | None = None,
 ) -> np.ndarray:
     """Rebuild one outcome so its condition means land exactly on ``level + effects``.
 
@@ -195,7 +196,13 @@ def recompose(
     pool = pool[np.isfinite(pool)]
     if len(pool) == 0:
         pool = np.zeros(1)
-    inner = inner + rng.choice(pool, size=len(template), replace=True)
+    if donors is None:
+        drawn = rng.choice(pool, size=len(template), replace=True)
+    else:
+        # Every outcome reads the same donor row, so one synthetic respondent
+        # inherits one real respondent's whole residual vector.
+        drawn = pool[np.mod(donors, len(pool))]
+    inner = inner + drawn
 
     condition = template["condition"].to_numpy()
     inner = inner - _group_mean(condition, inner)
@@ -242,6 +249,22 @@ def _clip_preserving_means(
     return values
 
 
+def _shared_donors(
+    parts: dict[str, Decomposition], n_rows: int, seed: int
+) -> np.ndarray:
+    """One donor row index per rebuilt respondent, reused across every outcome.
+
+    Indices are drawn against the *shortest* residual pool so that the same index
+    is valid for every outcome, which is what keeps a donor's residuals aligned
+    across outcomes.  Pools differ in length only through per-outcome missingness,
+    so in practice they are nearly equal and nothing is meaningfully truncated.
+    """
+    lengths = [len(part.residuals) for part in parts.values() if len(part.residuals)]
+    if not lengths:
+        return np.zeros(n_rows, dtype=int)
+    return np.random.default_rng(seed).integers(0, min(lengths), size=n_rows)
+
+
 def _group_mean(keys: np.ndarray, values: np.ndarray) -> np.ndarray:
     """Each element's group mean, aligned to the input order."""
     frame = pd.DataFrame({"k": keys, "v": values})
@@ -254,8 +277,25 @@ def recompose_frame(
     control: str,
     bounds: dict[str, tuple[float, float]] | None = None,
     seed: int = 0,
+    couple_residuals: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Rebuild every outcome in ``parts`` onto ``template``'s rows.
+
+    ``couple_residuals`` decides whether a synthetic respondent is one person or
+    several, and it matters more than it looks.  Drawing each outcome's residual
+    independently gives every rebuilt row a fresh personality per outcome, which
+    destroys the cross-outcome correlation structure of whatever run the residuals
+    came from.  That structure is a real and measurable property: on the Pfänder
+    control arm, DeepSeek-V4-Flash's respondents correlate -0.270 between the
+    twelve-item trust composite and distrust, and +0.637 between the two trust
+    measures, while Qwen2.5-7B manages +0.000 and +0.307 — the same respondent
+    reporting high trust *and* high distrust.  A hybrid meant to inherit
+    V4-Flash's coherence gets none of it if the residuals are drawn per outcome.
+
+    So with ``couple_residuals`` the donor rows are chosen **once** and every
+    outcome reads the same donor, carrying that donor's whole residual vector
+    across.  Set it to ``False`` only to reproduce the older independent-draw
+    behaviour.
 
     Returns the rebuilt frame and a per-outcome audit of how far the realised
     condition means ended up from their targets.  The audit is the point: a
@@ -264,6 +304,7 @@ def recompose_frame(
     """
     out = template.copy()
     drift = []
+    donors = _shared_donors(parts, len(template), seed) if couple_residuals else None
     for index, (outcome, part) in enumerate(parts.items()):
         limits = (bounds or {}).get(outcome, (0.0, 100.0))
         out[outcome] = recompose(
@@ -276,6 +317,7 @@ def recompose_frame(
             control=control,
             bounds=limits,
             seed=seed + index,
+            donors=donors,
         )
         realised = condition_effects(out, outcome, control)
         shared = realised.index.intersection(part.effects.index)
@@ -303,6 +345,7 @@ def hybrid(
     offsets_from: str | None = None,
     residuals_from: str | None = None,
     seed: int = 0,
+    couple_residuals: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Take each term of the decomposition from whichever run predicts it best.
 
@@ -330,4 +373,11 @@ def hybrid(
             ).residuals,
         )
     bounds = {outcome: (0.0, scale) for outcome, scale in outcomes.items()}
-    return recompose_frame(template, parts, control, bounds=bounds, seed=seed)
+    return recompose_frame(
+        template,
+        parts,
+        control,
+        bounds=bounds,
+        seed=seed,
+        couple_residuals=couple_residuals,
+    )

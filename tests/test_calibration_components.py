@@ -161,3 +161,81 @@ def test_clipping_keeps_values_in_range_and_reports_any_drift_it_causes():
     )
     assert rebuilt["trust"].between(0, 100).all()
     assert drift["max_abs_effect_drift"].iloc[0] > 1.0
+
+
+def multi_outcome_run(seed: int, coherence: float, n: int = 3000) -> pd.DataFrame:
+    """A run whose outcomes share a per-respondent general factor of known strength."""
+    rng = np.random.default_rng(seed)
+    frame = pd.DataFrame(
+        {
+            "condition": rng.choice([CONTROL, "arm_a"], size=n),
+            "party": rng.choice(["Republican", "Democrat"], size=n),
+            "gender": rng.choice(["Male", "Female"], size=n),
+        }
+    )
+    person = rng.normal(0, 15, n)
+    for outcome in OUTCOMES:
+        frame[outcome] = (
+            50.0
+            + np.where(frame["condition"] == "arm_a", 4.0, 0.0)
+            + coherence * person
+            + np.sqrt(max(1 - coherence**2, 0.0)) * rng.normal(0, 15, n)
+        ).clip(0, 100)
+    return frame
+
+
+def _cross_outcome_r(frame: pd.DataFrame) -> float:
+    values = frame[frame.condition == CONTROL][list(OUTCOMES)].dropna().to_numpy(float)
+    matrix = np.corrcoef(values, rowvar=False)
+    return float(matrix[np.triu_indices_from(matrix, 1)].mean())
+
+
+def test_coupled_residuals_carry_cross_outcome_coherence_across():
+    """A synthetic respondent must be one person, not one person per outcome.
+
+    Drawing each outcome's residual independently gave the rebuilt sample less
+    coherence than either run it was built from — on the real Pfänder frames the
+    trust/distrust correlation went from V4-Flash's -0.270 to -0.033. Coherence is
+    a property of the residual *vector*, so donors are chosen once per row.
+    """
+    incoherent = multi_outcome_run(11, coherence=0.0)
+    coherent = multi_outcome_run(12, coherence=0.9)
+    runs = {"incoherent": incoherent, "coherent": coherent}
+
+    assert _cross_outcome_r(coherent) > 0.5
+    assert abs(_cross_outcome_r(incoherent)) < 0.1
+
+    coupled, _ = C.hybrid(
+        runs,
+        OUTCOMES,
+        MODERATORS,
+        CONTROL,
+        effects_from="incoherent",
+        residuals_from="coherent",
+        couple_residuals=True,
+    )
+    independent, _ = C.hybrid(
+        runs,
+        OUTCOMES,
+        MODERATORS,
+        CONTROL,
+        effects_from="incoherent",
+        residuals_from="coherent",
+        couple_residuals=False,
+    )
+    assert _cross_outcome_r(coupled) > 0.4
+    assert abs(_cross_outcome_r(independent)) < 0.1
+
+
+def test_coupling_residuals_does_not_disturb_the_effects():
+    """Coherence must be inherited without moving the condition means."""
+    runs = {"a": multi_outcome_run(13, coherence=0.2), "b": multi_outcome_run(14, 0.9)}
+    rebuilt, drift = C.hybrid(
+        runs, OUTCOMES, MODERATORS, CONTROL, effects_from="a", residuals_from="b"
+    )
+    assert (drift["max_abs_effect_drift"] < 1e-9).all()
+    for outcome in OUTCOMES:
+        before = C.condition_effects(runs["a"], outcome, CONTROL)
+        after = C.condition_effects(rebuilt, outcome, CONTROL)
+        for arm in before.index:
+            assert after[arm] == pytest.approx(before[arm], abs=1e-9)
