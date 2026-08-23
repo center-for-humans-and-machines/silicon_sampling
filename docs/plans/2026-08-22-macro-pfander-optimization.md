@@ -516,6 +516,71 @@ test between approaches. So hedging is free. The three entries should differ alo
 
 ---
 
+## 8.5 Progress and corrections (2026-08-23)
+
+Three of the plan's own defaults have been overturned by measurement. They are
+recorded here rather than edited away, because the reasoning that produced them
+was sound on the evidence available and the corrections are the useful part.
+
+**Corrected: global effect shrinkage is not a transferable default.** §2 A1 called
+κ = 0.159 "mandatory hygiene" on the strength of its stability across Voelkel
+folds (0.137–0.185). That stability is *within* one study, and the quantity is not
+a property of the sampler — it is the ratio of real effects to ours. Mean signed
+human intervention effect, measured from each study's own participants: **Voelkel
+1.125 pp, Goldwert 2.967, ICPC 5.035** — a 4.5-fold range. Our averaged Pfänder
+effects run 2.467 pp, so the implied factor is 0.46 / 1.20 / 2.04 against the
+three. **The range spans 1.0, so the direction of the correction is undetermined**,
+and Pfänder is a climate study, making Voelkel the worst of the three to fit on.
+Applying 0.159 would have shrunk our effects to 0.39 pp against a climate
+reference of 3–5 pp. So "base models exaggerate effects 3–6×" is substantially a
+Voelkel artefact. The primary entry applies no global shrinkage.
+
+**Corrected: scale does not help effect recovery, now shown within a family.**
+Qwen2.5-72B finished both studies at 2,465 resp/h on 4×H200 — twice V4-Flash, as
+derived. It is *worse* than Qwen2.5-7B on Voelkel: r 0.340 against 0.408, ρ 0.189
+against 0.311, directional 51.9% against 61.1%. Its level error stayed at 22.4
+against 7B's 23.7, so V4-Flash's much better 8.3 is not a size effect.
+
+**Added: averaging models is the largest free gain.** The samplers' errors are
+close to independent (7B↔72B effect correlation +0.315, 7B↔V4 +0.091), so
+`avg(7B, 72B)` reaches r = 0.460 — better than any single model. Combined with
+within-outcome shrinkage and V4-Flash's context it reaches **r 0.576, ρ 0.507,
+RMSE 1.256, β 0.987**, beating a fresh human half sample on five of eight
+Section-1 metrics. That wins by being *smoother*, not wiser: the noise-corrected
+between-arm effect SD has a **median of 0.000 in all three calibration studies**,
+so at this sample size most of the truth about which message works is unmeasurable
+and a predictor that declines to bet on it beats a noisy half sample.
+
+**The separability §6 assumed is confirmed.** Recipes differing only in the effect
+transform have bit-identical distribution and demographic numbers, and vice versa,
+so the two families combine and the combination inherits the best of each.
+
+### Delivered
+
+- **Three format-valid Tier-1 entries** at `data/pfander/submission/{primary,
+  secondary-1,secondary-2}`, all PASS WITH WARNINGS (41 checks, 0 failures; the
+  two warnings are the human registration checklist and Zenodo metadata).
+- Five silicon samples on Pfänder (7B, 7B-replicate, 72B, 72B-replicate, V4-Flash)
+  and three on Voelkel; **ICPC and Goldwert sampling in flight**.
+- All six demographics pre-filled: the `Less than $30,000` reference bracket goes
+  from 139 of 18,000 (18 in the control arm) to 2,321, against a CCAM target of
+  13.54%.
+- Level anchors from TISP and Goldwert: 3 outcomes at grade `near`, break-even
+  anchor error measured at 4.7 points. V4-Flash's Pfänder levels sit 2.0–3.1
+  points from the TISP anchor where Qwen is 14.2 and 9.4 off — corroborating the
+  hybrid's level source from data that had nothing to do with choosing it.
+
+### Still outstanding
+
+1. **Leave-one-study-out selection** across Voelkel / ICPC / Goldwert, once the
+   two new samples land. This is what turns the within-study evidence for
+   within-outcome shrinkage (2 of 3 folds) into something adopted or dropped.
+2. **The cross-study outcome-profile transfer test** — whether an anchor can reach
+   the ρ ≈ 0.7 break-even §2 B1 requires.
+3. Genuine vLLM decode on ICPC and Goldwert was unexercised at build time (the
+   4090 was full); the DAIS runs are the first real test.
+4. The response-shape gap: OVL 0.781 against a human replication's 0.925.
+
 ## 9. Decisions taken (2026-08-23)
 
 1. **Post-hoc transformation is approved.** Anything built on public datasets is
