@@ -333,18 +333,50 @@ BEST_RANKERS = ("qwen25_7b", "qwen25_72b")
 #: The run three independent sources agree is closest to real response levels.
 GROUNDED = "v4_flash"
 
+#: Mean signed human intervention effect, in pp of scale range, per reference
+#: study.  These are the numbers that decide whether shrinkage is warranted at
+#: all, and they disagree by 4.5x — see :func:`hybrid_default`.
+HUMAN_EFFECT_SCALE = {
+    "Voelkel": 1.125,  # democratic norms, 2022
+    "Goldwert": 2.967,  # climate advocacy, US megastudy
+    "ICPC": 5.035,  # climate belief and policy, US subsample
+}
+
 
 def hybrid_default(
     effects_from: str | tuple[str, ...] = BEST_RANKERS,
     grounded: str = GROUNDED,
-    shrink: float | None = 0.159,
+    shrink: float | None = None,
 ) -> Recipe:
     """The component hybrid: the best rankers' averaged effects, one model's context.
 
-    ``shrink`` defaults to the factor fitted on Voelkel, whose out-of-fold
-    estimates spanned 0.137-0.185 — stable enough to carry as a single number.
-    It cannot move the leaderboard's sort key and is close to the whole story for
-    beta and RMSE, so it is applied by default and is not something to tune.
+    **``shrink`` defaults to None, and that is a reversal worth explaining.**  The
+    factor fitted on Voelkel is 0.159, and its out-of-fold estimates there span
+    only 0.137-0.185 — stable enough that it looked safe to carry as a single
+    number.  It is not, because that stability is *within* one study and the
+    quantity it encodes is not a property of the sampler alone: it is the ratio of
+    real effects to ours, and real effects differ enormously between studies.
+    Mean signed human intervention effect, in pp of scale range:
+    Voelkel 1.125, Goldwert 2.967, ICPC 5.035 — a 4.5-fold range.
+
+    Our own Pfänder effects average 2.46 pp (Qwen2.5-7B, over all 208 pairs), so
+    the implied factor is 0.46 against Voelkel, 1.20 against Goldwert and 2.04
+    against ICPC.  **The range spans 1.0, so the direction of the correction is not
+    even determined**, and Pfänder is a climate study, which makes Voelkel — a
+    2022 democratic-norms study with unusually small real effects — the worst of
+    the three to fit it on.  Applying 0.159 would shrink our effects to 0.39 pp
+    against a climate-megastudy reference of 3-5 pp: an 8-13x under-prediction, and
+    a large RMSE error in the opposite direction to the one it was meant to fix.
+
+    So the finding that base models "exaggerate effects 3-6x" is substantially a
+    Voelkel artefact rather than a property of the samplers.  Shrinkage is offered
+    as an explicit variant rather than applied by default, and the honest summary
+    is that our Pfänder effect magnitudes are already inside the range real
+    climate megastudies produce.
+
+    Caveat on the largest reference: ICPC's US control arm is small (n = 669) and
+    its effects run hotter than the paper's global headline, so 5.035 is the least
+    secure of the three. Excluding it still leaves a 2.6-fold range that spans 1.0.
 
     The default effect source is the Qwen pair rather than Qwen2.5-7B alone
     because averaging them measured better on every Section-1 metric (pooled r
