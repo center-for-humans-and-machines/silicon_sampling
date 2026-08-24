@@ -310,9 +310,143 @@ def state_range(anchors: str, lo: int, hi: int) -> str:
 #: ASCII hyphen, but a model writing prose reaches for the typographic ones.
 _MINUS = ("-", "\u2212", "\u2013", "\u2014")
 
+#: The value recorded when a respondent takes a slider's opt-out instead of
+#: answering on the scale.  A short string on purpose: ``pd.to_numeric(...,
+#: errors="coerce")`` turns it into ``NaN``, which is exactly what the escape
+#: became in the published file, so the sampled column arrives in the analysis
+#: frame already shaped like the human one and needs no special case anywhere
+#: downstream.  It is never what the transcript shows — see
+#: :meth:`EscapableIntSlot.render`.
+NOT_APPLICABLE = "N/A"
+
+#: Spellings of the opt-out that are accepted on top of the item's own wording.
+#: A model that has read a forty-six-character parenthetical escape will often
+#: type its first two words and stop, and refusing that would recreate the very
+#: failure this slot exists to fix.
+_ESCAPE_ALIASES = ("Not Applicable", "Not applicable", "N/A", "NA")
+
+#: Punctuation allowed to trail the opt-out before the draw stops being the
+#: opt-out.  One character wider than the shared slot's set, and deliberately:
+#: the ``flyless`` wording ends mid-parenthesis in the survey's own text, so a
+#: model that closes the bracket the survey never closed is agreeing with the
+#: option rather than hedging between two.
+_ESCAPE_TRAILING = ".,;:()!?\u2019'\"\u2014- \t"
+
+
+def escape_text(payload: dict) -> str:
+    """The wording of a slider's opt-out checkbox, or ``""`` if it has none.
+
+    Read from three places in that order because Qualtrics writes it in three
+    places and no single one of them is reliable.  ``Configuration.NotApplicable``
+    is the flag that says the checkbox was *shown*; ``NotApplicableText`` usually
+    carries the wording but is absent on ``CC_policy``, which files it under the
+    ``"NA"`` key of ``Labels`` instead; and when both are missing Qualtrics shows
+    its own default.  Keying on the flag rather than on the presence of the text
+    is what stops a shown escape from going unnoticed, and reading the ``"NA"``
+    label is what stops it from leaking into the endpoint-label line as if it were
+    a scale point.
+    """
+    config = payload.get("Configuration") or {}
+    if not config.get("NotApplicable"):
+        return ""
+    stated = str(config.get("NotApplicableText") or "").strip()
+    if stated:
+        return stated
+    labels = payload.get("Labels")
+    if isinstance(labels, dict):
+        entry = labels.get("NA")
+        if isinstance(entry, dict):
+            labelled = strip_html(str(entry.get("Display", ""))).strip()
+            if labelled:
+                return labelled
+    return "Not Applicable"
+
+
+def _sentence(text: str) -> str:
+    """``text`` with a full stop, unless it already ends in punctuation."""
+    return text if text[-1:] in ".!?" else f"{text}."
+
 
 @dataclass(frozen=True)
-class SignedIntSlot(IntSlot):
+class EscapableIntSlot(IntSlot):
+    """A slider that also accepts the opt-out checkbox printed beside it.
+
+    Five live sliders in this instrument carry a Qualtrics "Not Applicable"
+    control, and until this class existed the transcript printed it and the slot
+    refused it.  That combination is worse than either half alone.  A model that
+    followed the printed instruction produced a draw no ``IntSlot`` could parse,
+    so the sampler spent its four rounds and its constrained-decoding fallback on
+    it and then recorded ``(lo + hi) // 2`` — a forced 50 on a 0-100 scale,
+    written into the column as if the respondent had chosen the exact midpoint.
+
+    The escape is not a nuisance option, it is where this study's missingness
+    comes from.  ``flyless`` has 14,069 usable values out of 31,324 against
+    23,706 for ``conversation`` on the same screen, so roughly 9,637 people —
+    41% of everyone who reached the page — ticked "I already don't fly" rather
+    than answering; ``lessbeef`` about 2,529 and ``pol_candidate`` about 1,431.
+    ``flylessN`` and ``lessbeefN`` *are* ``lifestyle_changes``, both of its
+    members, and ``pol_candidateN`` is one of four in ``political_advocacy``, so a
+    sample where nobody can opt out is not measuring the same composite: it fills
+    the arm mean with numbers from people the study recorded as having no answer
+    to give.  Every existing run shows 100.0% non-null on all three, which is the
+    signature of an escape nobody could take.
+
+    So the value recorded is :data:`NOT_APPLICABLE`, a non-numeric string that
+    ``outcomes.compute`` coerces to ``NaN`` exactly where the published file has
+    ``NaN``, and the transcript shows the item's own wording rather than the
+    sentinel.  Two residual gaps are worth naming.  The constrained-decoding
+    fallback in :mod:`silicon_sampling.sampling.driver` builds its grammar from
+    ``range(lo, hi + 1)`` for anything that is an ``IntSlot``, so on the rare path
+    where four rounds of free draws all fail the model is handed a number-only
+    grammar and cannot opt out; and the forced default is still the midpoint.
+    Both are last-resort paths that this slot makes far harder to reach rather
+    than closing, and both live in a shared module three other studies use.
+    """
+
+    #: The opt-out's on-screen wording, verbatim from the survey.
+    escape: str = ""
+
+    @property
+    def legal_spec(self) -> str:
+        base = f"{self.lo}..{self.hi}"
+        return f"{base} | {NOT_APPLICABLE}" if self.escape else base
+
+    def stated_range(self) -> str:
+        """The sentence that says what numbers are legal."""
+        return f"Whole number from {self.lo} to {self.hi}."
+
+    def describe(self) -> str:
+        parts = [self.anchors] if self.anchors else []
+        parts.append(self.stated_range())
+        if self.escape:
+            parts.append(f"Or answer: {_sentence(self.escape)}")
+        return "  ".join(parts)
+
+    def escape_value(self, raw: str):
+        """:data:`NOT_APPLICABLE` if ``raw`` takes the opt-out, else ``None``."""
+        if not self.escape:
+            return None
+        text = raw.split("\n", 1)[0].strip()
+        if not text:
+            return None
+        low = text.lower()
+        for spelling in sorted((self.escape, *_ESCAPE_ALIASES), key=len, reverse=True):
+            if low.startswith(spelling.lower()):
+                rest = text[len(spelling) :]
+                if rest.strip(_ESCAPE_TRAILING) == "":
+                    return NOT_APPLICABLE
+        return None
+
+    def parse(self, raw: str):
+        taken = self.escape_value(raw)
+        return taken if taken is not None else super().parse(raw)
+
+    def render(self, value) -> str:
+        return self.escape if value == NOT_APPLICABLE else super().render(value)
+
+
+@dataclass(frozen=True)
+class SignedIntSlot(EscapableIntSlot):
     """A slider whose scale runs through zero, so half its range is negative.
 
     The shared :class:`~silicon_sampling.survey.slots.IntSlot` matches an answer
@@ -329,63 +463,104 @@ class SignedIntSlot(IntSlot):
     is this instrument's problem, so it lives with this instrument's converter.
     The prose line has to change too: the project's slider convention states the
     endpoint *labels* and no numbers, which leaves a model with no way to know a
-    minus sign is permitted, so this slot says the range out loud.
+    minus sign is permitted, so this slot says the range out loud — once.  It used
+    to say it twice, because the caller pre-baked ``state_range`` into ``anchors``
+    and then :meth:`describe` appended its own sentence to it, which is why
+    :meth:`EscapableIntSlot.describe` now composes the whole line from parts and
+    the only thing a caller passes is the endpoint labels.
     """
 
-    def describe(self) -> str:
-        stated = (
+    def stated_range(self) -> str:
+        return (
             f"Whole number from {self.lo} to {self.hi}; negative answers are allowed."
         )
-        return f"{self.anchors}  {stated}" if self.anchors else stated
 
     def parse(self, raw: str):
+        taken = self.escape_value(raw)
+        if taken is not None:
+            return taken
         text = raw.split("\n", 1)[0].strip()
         sign = 1
         for mark in _MINUS:
             if text.startswith(mark):
                 sign, text = -1, text[len(mark) :].lstrip()
                 break
-        magnitude = super().parse(text)
+        magnitude = IntSlot.parse(self, text)
         if magnitude is None:
             return None
         value = sign * magnitude
         return value if self.lo <= value <= self.hi else None
 
 
+def slider_anchors(payload: dict) -> str:
+    """The endpoint labels a slider showed, with the opt-out taken back out.
+
+    Qualtrics files the opt-out's wording among the scale ``Labels``, under the
+    key ``"NA"``, so reading the labels in order gives "Definitely not …
+    Definitely yes … Not Applicable / Not Eligible to Vote" and presents a
+    separate checkbox as a third point on the scale.  Dropping it by *key* rather
+    than by comparing it against ``NotApplicableText`` is what makes this hold on
+    ``CC_policy``, whose escape is in the labels and nowhere else.
+    """
+    labels = payload.get("Labels")
+    if not isinstance(labels, dict):
+        return anchors_from_labels(payload)
+    scale = {key: value for key, value in labels.items() if str(key) != "NA"}
+    return anchors_from_labels({**payload, "Labels": scale})
+
+
 def _slider_slots(question: Question, payload: dict, prompt: str) -> list[Slot]:
+    """One integer slot per bar, with the range stated and the opt-out honoured.
+
+    ``anchors`` here is the endpoint labels and nothing else: the range sentence
+    and the opt-out sentence are composed by
+    :meth:`EscapableIntSlot.describe`, because an earlier version baked the range
+    into ``anchors`` and the bipolar slider's own ``describe`` then appended a
+    second copy of it.  The opt-out is printed in the survey's own words, which on
+    two items includes an unbalanced quotation mark the survey itself left open;
+    reproducing it is closer to what the respondent read than paraphrasing it
+    away, and the earlier paraphrase — a flat "Not Applicable." — had thrown out
+    the part that told a respondent what the escape was *for*.
+    """
     lo, hi = slider_bounds(payload)
-    config = payload.get("Configuration") or {}
-    not_applicable = str(config.get("NotApplicableText") or "").strip()
-    # Qualtrics files the "Not Applicable" escape among the scale labels, so
-    # anchors_from_labels picks it up and the endpoint line reads "Definitely not
-    # ... Definitely yes ... Not Applicable". It is a separate control, not a
-    # scale point, so it comes out of the anchors and is stated once, its own way.
-    anchors = " … ".join(
-        part
-        for part in anchors_from_labels(payload).split(" … ")
-        if part and part != not_applicable
-    )
+    escape = escape_text(payload)
+    anchors = slider_anchors(payload)
     rows = _rows(payload)
-    slots: list[Slot] = []
-    for key, label in rows:
-        described = state_range(anchors, lo, hi)
-        if not_applicable:
-            # The source text for two of these items has an unbalanced quote of
-            # its own; quoting it again would compound the mess, so it is
-            # normalised to a bare parenthetical.
-            described += "  Or answer: Not Applicable."
-        kind = SignedIntSlot if lo < 0 else IntSlot
-        slots.append(
-            kind(
-                id=published_column(export_column(question, key)),
-                prompt=prompt if len(rows) == 1 else f"{prompt} — {label}",
-                anchors=described,
-                lo=lo,
-                hi=hi,
-                max_tokens=6,
-            )
+    kind = SignedIntSlot if lo < 0 else EscapableIntSlot
+    return [
+        kind(
+            id=published_column(export_column(question, key)),
+            prompt=prompt if len(rows) == 1 else f"{prompt} — {label}",
+            anchors=anchors,
+            lo=lo,
+            hi=hi,
+            escape=escape,
+            max_tokens=max(6, len(escape.split()) * 3 + 4) if escape else 6,
         )
-    return slots
+        for key, label in rows
+    ]
+
+
+#: A tag whose closing ``>`` the survey's author never typed.  Anchored to the end
+#: of the string and required to start at a real ``<``, so it cannot bite text
+#: that merely contains a less-than sign.
+_UNCLOSED_TAG = re.compile(r"</?[A-Za-z][^<>]*$")
+
+
+def clean_label(text: object) -> str:
+    """``strip_html``, then the one tag ``strip_html`` structurally cannot remove.
+
+    The shared stripper matches ``<[^>]+>`` — a tag with both of its angle
+    brackets — which is the right rule and misses this instrument's one broken
+    label.  The emotion battery's third row is stored as
+    ``<span …>Inspired</span></span`` with the final bracket missing, so the
+    stripper took the two well-formed tags, left the third, and ``Inspired</span``
+    went into the transcript of every arm that shows the battery as the text of a
+    live matrix row.  Fixed here rather than in the shared stripper because the
+    shared one serves four studies and a rule that deletes trailing ``<…`` is a
+    rule that can eat real text; scoped to this instrument's labels, it cannot.
+    """
+    return _UNCLOSED_TAG.sub("", strip_html(str(text))).strip()
 
 
 def one_line(text: str) -> str:
@@ -403,7 +578,7 @@ def one_line(text: str) -> str:
     damage plainly — its ``Options:`` line runs down eight rows — which is why this
     is fixed where the label is built rather than papered over at parse time.
     """
-    return " ".join(str(text).split())
+    return " ".join(clean_label(text).split())
 
 
 def _rows(payload: dict) -> list[tuple[str, str]]:
@@ -415,7 +590,7 @@ def _rows(payload: dict) -> list[tuple[str, str]]:
     keys = [str(k) for k in order if str(k) in {str(x) for x in choices}]
     out = []
     for key in keys:
-        label = strip_html(str(choices[key].get("Display", "")))
+        label = clean_label(choices[key].get("Display", ""))
         out.append((key, "" if label in {"", "\xa0"} else label))
     return out or [("", "")]
 
@@ -522,6 +697,31 @@ def _numeric_range(payload: dict) -> tuple[int, int] | None:
     )
 
 
+#: Prompts that point at another field on the *same page*, and the note that says
+#: which. Serialising a Qualtrics page destroys simultaneity: a participant saw
+#: every box on the page at once, so "include your zipcode below" plainly meant the
+#: separate box further down. Read one question at a time, the same sentence is an
+#: instruction about the box being answered — and the models took it that way. The
+#: letter box came back holding a ZIP code as its median answer: median length 5
+#: characters, and 79-84% of answers under 40, with V4-Flash's first five answers
+#: being 08512, 90001, 11804, 88011, 97070. `letter` is a member of the
+#: `political_advocacy` composite, so this was scored.
+#:
+#: The fix is to restore the missing context rather than to instruct the model: the
+#: note describes the page the participant saw, and nothing more.
+SAME_PAGE_NOTES = {
+    "letter_content": (
+        "(The zipcode box referred to is a separate question on this same page, "
+        "shown below this one.)"
+    ),
+}
+
+
+def same_page_note(slot_id: str) -> str:
+    """Any note restoring a same-page reference this slot's prompt makes."""
+    return SAME_PAGE_NOTES.get(slot_id, "")
+
+
 def convert_question(
     question: Question,
     payload: dict,
@@ -617,10 +817,12 @@ def convert_question(
             ]
         rows = _rows(payload) if question.selector == "FORM" else [("", "")]
         if len(rows) == 1 and not rows[0][1]:
+            slot_id = published_column(export_column(question))
+            note = same_page_note(slot_id)
             return notes + [
                 FreeTextSlot(
-                    id=published_column(export_column(question)),
-                    prompt=prompt,
+                    id=slot_id,
+                    prompt=f"{prompt}\n{note}".rstrip() if note else prompt,
                     hint="Free text.",
                     max_tokens=120,
                     max_chars=1200,

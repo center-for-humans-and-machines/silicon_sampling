@@ -44,6 +44,32 @@ columns — ``letter``, ``newsletter`` and ``donation_bin`` — were zero-filled
 all 31,324 rows by their construction even though their source items stop at
 about 23,400.  A mean taken over the full column is not a mean over the people
 who saw the question.
+
+Two shapes of missingness live under that sentence and only one of them is
+reproducible.  The heavy non-null counts on ``flyless``, ``lessbeef`` and
+``pol_candidate`` are *opt-outs*: each of those sliders carried a "Not
+Applicable" checkbox and a respondent who already did not fly ticked it, which
+the cleaning script read as missing.  A synthetic respondent can do the same —
+see :class:`~silicon_sampling.goldwert.convert.EscapableIntSlot`, which prints
+the escape in the survey's own words and records ``NaN`` where the published file
+has ``NaN`` — so ``lifestyle_changes``, whose only two members are ``flylessN``
+and ``lessbeefN``, comes out missing for the same *kind* of respondent even
+though the rate will not match.
+
+The zero-fills are not reproducible at all, and ``newsletter`` is the one that
+costs something, because unlike ``letter`` it is scored twice: standalone in
+:data:`SCORED` at weight 1.0 and again as one of the four in
+``public_awareness``.  4,140 of the 19,141 kept-arm rows are zeros contributed by
+respondents who never reached the signup form, reach is *lowest* in the control
+arm (69.2% against 65.1%-83.3% across the treatments), and the resulting bias has
+a known direction: the zero-fill inflates the mean absolute arm effect by 1.95x
+and flips its sign on four of the ten arms.  A silicon sample has reach 1.0 and
+so estimates the reach-conditional effect — attenuated by about half against the
+published all-rows one, wrong-signed on those four arms, and about +0.07 high in
+level.  :func:`~silicon_sampling.goldwert.score.newsletter_contribution` is the
+table; the point of stating it here is that ``SCORED`` and ``COMPOSITES`` below
+both carry the column and neither can be written any other way, because the
+comparison is against the authors' published construction.
 """
 
 from __future__ import annotations

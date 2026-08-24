@@ -221,13 +221,17 @@ def extras_order(rng: random.Random) -> list[str]:
 #: and ``assemble(..., panel_header=False)`` renders the instrument without it for
 #: anyone who wants the unmodified thing.
 #:
-#: What it is *not* is labelled as an addition in the transcript a model reads.
-#: The block's note says so, and the note reaches the rendered template — but
-#: ``Session.transcript()`` strips block notes, exactly as it strips the ``<<?if``
-#: markers, so a driven session goes from the file header straight to
-#: ``PARTICIPANT PANEL RECORD``.  Whether the caveat should be on the page is a
-#: design question about the panel record rather than a rendering bug, so it is
-#: written down here instead of quietly assumed either way.
+#: And it says so *on the page*, not only in the block note.  The note was where
+#: the caveat lived first, which looked sufficient because it reaches the rendered
+#: template — but ``Session.transcript()`` strips block notes, exactly as it strips
+#: the ``<<?if`` markers, so a driven session went from the file header straight to
+#: ``PARTICIPANT PANEL RECORD`` and the only reader who ever saw the caveat was a
+#: human reading the template.  The model saw seven answered demographic questions
+#: at the top of a transcript headed "Verbatim record of one session" and no reason
+#: they were there.  So :data:`PANEL_PROVENANCE` is a body element of the block.
+#: Adding it is not the same kind of addition as putting words in a screen the
+#: participant read: the whole block is ours, and a block that describes itself is
+#: strictly less misleading than one that looks like a screen.
 PANEL_FIELDS: tuple[tuple[str, str], ...] = (
     ("panel_gender", "Gender"),
     ("panel_age", "Age"),
@@ -246,6 +250,15 @@ PANEL_FIELDS: tuple[tuple[str, str], ...] = (
 )
 
 
+#: The caveat, in the body of the panel-record block so that a driven session
+#: carries it.  Worded as a statement about the record rather than as an
+#: instruction, because it is a provenance line and not a screen.
+PANEL_PROVENANCE = (
+    "Supplied by the survey panel before the session began. These are not screens "
+    "this participant filled in; the survey itself asks for them at the end."
+)
+
+
 def panel_block() -> TranscriptBlock:
     """The panel-supplied record, printed above the consent form."""
     lines = [f"{label}: <<={field}>>" for field, label in PANEL_FIELDS]
@@ -258,6 +271,7 @@ def panel_block() -> TranscriptBlock:
         ),
         elements=[
             Text("PARTICIPANT PANEL RECORD", style="head"),
+            Text(PANEL_PROVENANCE),
             Text("\n".join(lines)),
         ],
     )

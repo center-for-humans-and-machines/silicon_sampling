@@ -50,7 +50,7 @@ from ..sampling.tokens import load_tokenizer
 from ..survey.render import walk
 from ..survey.session import Session
 from ..survey.slots import ChoiceSlot, FreeTextSlot, IntSlot, Slot
-from . import instrument as inst
+from . import convert, instrument as inst
 from .profiles import Profile
 
 #: The bracketed line that stands in for a page element the export does not hold.
@@ -184,19 +184,42 @@ def fit_token_budgets(model: str) -> dict[str, int]:
 
     Sizing these by hand is what turns a long option into a systematically
     rejected one; see :func:`silicon_sampling.sampling.driver.token_budget`.
+
+    One budget cannot be left to that function.  It sizes anything that is an
+    ``IntSlot`` on its widest *number* — two or three tokens — and five sliders in
+    this instrument also accept an opt-out whose wording runs to fourteen.  Three
+    tokens of headroom would cut ``Not Applicable (e.g., "I already don't eat red
+    meat")`` off after its first two words, and a truncated draw is a *rejected*
+    draw, which is the same systematic loss the shared function exists to prevent
+    — only aimed at the escape rather than at a long option.
     """
     tokenizer = load_tokenizer(model)
-    return {
-        slot_id: token_budget(slot, tokenizer) for slot_id, slot in all_slots().items()
-    }
+    budgets = {}
+    for slot_id, slot in all_slots().items():
+        budget = token_budget(slot, tokenizer)
+        escape = getattr(slot, "escape", "")
+        if escape:
+            spelled = tokenizer(" " + escape, add_special_tokens=False)["input_ids"]
+            budget = max(budget, len(spelled) + 4)
+        budgets[slot_id] = budget
+    return budgets
 
 
 def widest_answer(slot: Slot):
-    """The longest answer a slot will accept, for worst-case sizing."""
+    """The longest answer a slot will accept, for worst-case sizing.
+
+    For a slider with an opt-out that is the opt-out, not the largest number:
+    ``render`` expands the sentinel into the item's own wording, which is forty-six
+    characters against three.
+    """
     if isinstance(slot, ChoiceSlot):
         return max(slot.options, key=len)
     if isinstance(slot, IntSlot):
-        return max((slot.lo, slot.hi), key=lambda value: len(str(value)))
+        widest = max((slot.lo, slot.hi), key=lambda value: len(str(value)))
+        escape = getattr(slot, "escape", "")
+        if escape and len(escape) > len(str(widest)):
+            return convert.NOT_APPLICABLE
+        return widest
     if isinstance(slot, FreeTextSlot):
         return "x " * min(slot.max_chars // 2, slot.max_tokens)
     return ""  # pragma: no cover - every slot type is covered above

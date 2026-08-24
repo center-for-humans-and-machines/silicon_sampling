@@ -145,6 +145,24 @@ overwriting a real outcome.
 **Consent and both attention checks are pre-filled as passed.** The published file
 contains only respondents who passed them.
 
+**Five sliders carry an opt-out, and it is answerable.** `pol_candidate`,
+`flyless`, `lessbeef` and the two political-orientation rows printed a Qualtrics
+"Not Applicable" checkbox, worded differently on each — "Not Applicable / Not
+Eligible to Vote", "Not Applicable (e.g., \"I already don't fly\"", "Prefer not to
+respond" — and the transcript prints the survey's own words and accepts them. An
+answer that takes the escape records `N/A`, which the analysis frame coerces to the
+same `NaN` the published file has; that is where this study's missingness comes
+from, and on `flyless` it is 41% of everyone who reached the page. What is not
+reproducible is the *rate*: a synthetic respondent decides whether the item applies
+to it from a one-line profile.
+
+**The donation is a constant-sum item and the transcript can only say so.** The
+survey refused a page whose two boxes did not total ten. The driver samples one
+slot at a time and cannot hold a constraint across two, so the rule is stated in
+prose, the recorded pair is reconciled to `donation_keep = 10 - donation`, and
+`samples.csv` carries `donation_keep_drawn` and a per-row `donation_sums_to_ten`
+flag. Real models honour it 93% to 98% of the time unaided.
+
 **Known remaining gaps.** Four questions randomise their *options* rather than
 their order of appearance — the gender item, the two political-orientation slider
 rows, `MispCorrectionRisks`'s eight-way EPA multi-select and
@@ -265,6 +283,7 @@ def render_all(out_dir=TEMPLATES, seed: int = 0) -> dict:
                     "audio",
                     "n_assets",
                     "described",
+                    "labelled_from_export",
                     "undescribed",
                     "unrecoverable",
                 )

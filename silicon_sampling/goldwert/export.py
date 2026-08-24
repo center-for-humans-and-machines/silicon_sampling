@@ -65,13 +65,79 @@ three codeable members, so a reader can see the composite with and without the i
 that is doing the damage.  The summary dict reports ``letter_rate`` so the size of
 the departure is visible rather than inferred.
 
+**``newsletter`` is zero-filled the same way, and nothing can be done about it.**
+This is the second of the two outcomes the study exists to anchor, and it carries
+exactly the defect just described for ``letter`` — the column is 1 for a signup, 0
+for a refusal, and 0 again for the 4,140 of 19,141 kept-arm respondents who never
+reached the page.  ``newsletter`` is a standalone member of :data:`SCORED` at
+weight 1.0 *and* one of four in ``public_awareness``, and
+:func:`~silicon_sampling.goldwert.score.effects` takes the all-rows mean, so the
+attrition rides straight into both.
+
+The direction is not ambiguous and it is not small.  Reach is 69.2% in the control
+arm against 65.1%-83.3% in the treatments, so nine of the ten interventions
+*raised* the share of people who got as far as the signup form; the published
+all-rows ATEs therefore mix "more people signed up" with "more people were still
+there to be asked".  Conditioning on reach cuts the mean absolute arm effect from
+0.0372 to 0.0191 — the zero-fill **inflates** it by 1.95x — and reverses the sign
+on four of the ten arms.  A silicon sample has reach 1.0 by construction, so it
+can reproduce the reach-conditional effect and nothing else; scored against the
+published all-rows effect it will look attenuated by about half, and on
+``MispCorrectionRisks`` (+0.0405 -> -0.0006), ``HopeAngerNarratives`` (+0.0397 ->
+-0.0048), ``IndStructuralChange`` (+0.0160 -> -0.0230) and
+``EcologicalDisruptions`` (+0.0151 -> -0.0252) it will look *wrong-signed* while
+being right.  Correlation between the two sets of arm effects is r = 0.45,
+Spearman 0.61 — worse than ``letter``'s 0.82.  Our level will also sit high: the reached-only rate is 0.3183
+against 0.2495 all-rows, so about +0.07 on a 0-1 scale, the same direction and
+almost the same size as the ``letter`` level bias.
+:func:`~silicon_sampling.goldwert.score.newsletter_contribution` is the
+``letter_contribution`` counterpart that puts all of this on a table, and the
+summary dict below reports ``newsletter_rate`` next to ``letter_rate`` so the
+departure is visible at every build rather than inferred later.  ``donation_bin``
+is zero-filled identically (r = 0.62) but is in no composite; ``video`` is
+NaN-not-zero for non-reachers and is clean.
+
+**The donation's constant-sum rule is enforced on the recorded pair, and the
+draws are kept.**  ``QID34`` is a Qualtrics ``CS`` question with
+``Validation: {"EnforceRange": "ON", "Type": "ChoicesTotal", "ChoiceTotal": "10"}``:
+the survey refused a submission whose two boxes did not total ten, and all 23,732
+non-null human rows total exactly ten.  The transcript can only *state* the rule,
+because the driver samples one slot at a time and cannot hold a constraint across
+two, and the models mostly honour it anyway — 98.4% of ``qwen25_72b`` rows, 96.0%
+of ``v4_flash``, 93.1% of ``qwen25_7b``, against 9% for a stand-in that draws
+each box uniformly at random (11 of the 121 pairs total ten).  For the minority that do not, the pair is reconciled the way the
+survey reconciled it, to ``donation_keep = 10 - donation``: ``donation`` is the
+scored outcome and the column the study reports, ``donation_keep`` is
+definitionally ``10 - donation`` in the published file, and leaving the pair
+inconsistent would put rows in ``samples.csv`` that the instrument could not have
+produced.  The drawn value is not thrown away — it is kept as
+``donation_keep_drawn``, and every row carries ``donation_sums_to_ten`` so an
+analysis can condition on coherence instead of taking it on trust.
+
+What reconciliation does **not** do is rescue ``donation`` itself.  A model that
+answered 7 and 7, or 0 and 0, has misread a two-box allocation, and there is no
+reason to think it got the first box right and only the second wrong; the 124 to
+172 rows per run with a total of zero record "donated nothing" on the
+highest-weighted outcome in the study and reconciliation leaves them at zero.
+That is what the per-row flag is for.
+
 Two smaller fidelity notes, stated here because ``samples.csv`` is where someone
-will meet them.  The ``"Not Applicable"`` escapes on ``pol_candidate``, ``flyless``
-and ``lessbeef`` do not exist in the transcript, so those columns have no
-missingness here where the human ones are 28-55% missing.  And ``bankscore``
-required looking up the respondent's own real bank on a live site, so a sampled
-answer to it is a guess — which then decides, through ``derive_items``, whose
-``bank`` value survives into ``financial_advocacy``.
+will meet them.  The opt-out escapes on ``pol_candidate``, ``flyless``,
+``lessbeef``, ``Politics_Soc`` and ``Politics_Econ`` **are** in the transcript and
+**are** accepted — see
+:class:`~silicon_sampling.goldwert.convert.EscapableIntSlot` — and record
+:data:`~silicon_sampling.goldwert.convert.NOT_APPLICABLE`, which
+``pd.to_numeric(..., errors="coerce")`` turns into the same ``NaN`` the published
+file has.  An earlier version of this note claimed the escapes did not exist in
+the transcript; they did, on the screen, and what did not exist was a slot that
+would accept one, so a model following the printed instruction produced an
+unparseable draw and the forced default recorded a 50.  What remains unmatched is
+the *rate*: a synthetic respondent decides whether the item applies to it from a
+one-line profile, and the human rates are 41% on ``flyless``, 8% on ``lessbeef``
+and 5% on ``pol_candidate``.  And ``bankscore`` required looking up the
+respondent's own real bank on a live site, so a sampled answer to it is a guess —
+which then decides, through ``derive_items``, whose ``bank`` value survives into
+``financial_advocacy``.
 """
 
 from __future__ import annotations
@@ -120,6 +186,23 @@ LETTER_TERMS = re.compile(
     r"environment|renewable|clean energy|pollut",
     re.I,
 )
+
+#: The total the donation's two boxes had to reach before Qualtrics would accept
+#: the page, read off ``QID34``'s ``Validation.Settings.ChoiceTotal``.
+DONATION_TOTAL = 10
+#: Where the drawn second box is kept once the pair has been reconciled, and the
+#: per-row flag that says whether reconciling it changed anything.
+DONATION_DRAWN = "donation_keep_drawn"
+DONATION_COHERENT = "donation_sums_to_ten"
+
+#: The two human ``newsletter`` rates over the eleven kept arms, printed beside
+#: ours at every build.  The all-rows figure is what the published file and
+#: :func:`~silicon_sampling.goldwert.score.effects` use; the reached-only figure
+#: is the one a sample with reach 1.0 is actually comparable to.  Recomputed by
+#: :func:`~silicon_sampling.goldwert.score.newsletter_contribution`, and pinned
+#: here so a build that has no access to the human file still prints them.
+HUMAN_NEWSLETTER_RATE_ALL_ROWS = 0.2495
+HUMAN_NEWSLETTER_RATE_REACHED = 0.3183
 
 
 def read_answers(path: Path) -> list[dict]:
@@ -181,6 +264,34 @@ def letter_code(text: object) -> float:
     return 1.0 if LETTER_TERMS.search(stripped) else 0.0
 
 
+def enforce_donation_total(frame: pd.DataFrame) -> pd.DataFrame:
+    """Make the donation's two boxes total ten, and record whether they already did.
+
+    The survey would not accept the page otherwise, and all 23,732 non-null human
+    rows total exactly ten, so a sampled row that does not is a row the instrument
+    could not have produced.  The driver cannot prevent it — it samples one slot at
+    a time and has no way to hold a constraint across two — so the reconciliation
+    happens here, on the recorded pair, and it always resolves in favour of
+    ``donation``: that is the scored outcome, the column the study reports, and the
+    one the published file defines ``donation_keep`` as the complement of.
+
+    Nothing is destroyed.  The drawn second box survives as
+    :data:`DONATION_DRAWN` and :data:`DONATION_COHERENT` marks the rows that
+    needed no help, both as columns rather than as a summary statistic, because
+    the rows that needed help are the rows whose ``donation`` is least
+    trustworthy and an analysis has to be able to find them.
+    """
+    data = frame.copy()
+    if "donation" not in data.columns or "donation_keep" not in data.columns:
+        return data
+    given = pd.to_numeric(data["donation"], errors="coerce")
+    kept = pd.to_numeric(data["donation_keep"], errors="coerce")
+    data[DONATION_DRAWN] = kept
+    data[DONATION_COHERENT] = (given + kept == DONATION_TOTAL).astype(int)
+    data["donation_keep"] = DONATION_TOTAL - given
+    return data
+
+
 def to_published_coding(frame: pd.DataFrame) -> pd.DataFrame:
     """Put the sampled answers into the coding the published file uses."""
     data = frame.copy()
@@ -189,7 +300,7 @@ def to_published_coding(frame: pd.DataFrame) -> pd.DataFrame:
             data[column] = data[column].map(table)
     if "letter_content" in data.columns:
         data[LETTER_COLUMN] = data["letter_content"].map(letter_code)
-    return data
+    return enforce_donation_total(data)
 
 
 def add_moderators(frame: pd.DataFrame) -> pd.DataFrame:
@@ -229,7 +340,17 @@ def build_frame(records: list[dict]) -> pd.DataFrame:
         + items
         + derived
         + outcomes
-        + ["donation_bin", "bank", "pos_emo", "neg_emo"]
+        + [
+            "donation_bin",
+            "bank",
+            "pos_emo",
+            "neg_emo",
+            # Per-row and not merely summarised: these two say which rows the
+            # donation's constant-sum rule had to be imposed on, and those are
+            # exactly the rows whose `donation` is least trustworthy.
+            DONATION_DRAWN,
+            DONATION_COHERENT,
+        ]
     )
     seen: list[str] = []
     for column in columns:
@@ -257,26 +378,45 @@ def build_csvs(out_dir: Path) -> dict:
             name: round(float(pd.to_numeric(frame[name], errors="coerce").mean()), 4)
             for name in oc.SCORED
         },
-        # Reported because it is the one column built by a rule of our own rather
-        # than by the study's: the human base rate is 0.41 and ours will not be.
+        # The two rates below are the two columns this package fills by a rule of
+        # its own rather than by the study's, and both departures have a known
+        # sign. `letter` is a keyword stand-in for a classifier that no longer
+        # exists: the human base rate is 0.4155 over all rows and ours runs near
+        # 0.85. `newsletter` needs no stand-in but cannot match either, because
+        # 4,140 of the 19,141 human rows are zeros contributed by people who never
+        # reached the signup form and a sampled respondent cannot drop out; the
+        # comparable human number is the reached-only 0.3183, not the published
+        # all-rows 0.2495. Both are printed at every build so that neither has to
+        # be rediscovered from the module docstring.
         "letter_rate": round(
             float(pd.to_numeric(frame[LETTER_COLUMN], errors="coerce").mean()), 4
         ),
-        # The donation is a Qualtrics *constant-sum* item: the survey refused a
-        # submission whose two boxes did not total ten, and the transcript can
-        # only state that rule in prose because the driver samples one slot at a
-        # time and has no way to enforce a constraint across two. `donation` is
-        # the scored outcome and is unaffected, but the share below says how often
-        # the model honoured the constraint, which is the thing to watch.
-        "donation_sums_to_ten": round(
-            float(
-                (
-                    pd.to_numeric(frame["donation"], errors="coerce")
-                    + pd.to_numeric(frame["donation_keep"], errors="coerce")
-                    == 10
-                ).mean()
-            ),
-            4,
+        "newsletter_rate": round(
+            float(pd.to_numeric(frame["newsletter"], errors="coerce").mean()), 4
+        ),
+        "human_newsletter_rate_reached": HUMAN_NEWSLETTER_RATE_REACHED,
+        "human_newsletter_rate_all_rows": HUMAN_NEWSLETTER_RATE_ALL_ROWS,
+        # How often the model honoured the constant-sum rule *before*
+        # `enforce_donation_total` imposed it, and what the two failure shapes
+        # cost. A total of zero records "donated nothing" on the highest-weighted
+        # outcome in the study; a total of twenty is the model answering the same
+        # question twice. Reconciliation fixes `donation_keep` and cannot fix
+        # either.
+        "donation_sums_to_ten": round(float(frame[DONATION_COHERENT].mean()), 4),
+        "donation_reconciled_rows": int((frame[DONATION_COHERENT] == 0).sum()),
+        "donation_drawn_total_zero": int(
+            (
+                pd.to_numeric(frame["donation"], errors="coerce")
+                + pd.to_numeric(frame[DONATION_DRAWN], errors="coerce")
+                == 0
+            ).sum()
+        ),
+        "donation_drawn_total_twenty": int(
+            (
+                pd.to_numeric(frame["donation"], errors="coerce")
+                + pd.to_numeric(frame[DONATION_DRAWN], errors="coerce")
+                == 2 * DONATION_TOTAL
+            ).sum()
         ),
         "samples_csv": str(path),
     }

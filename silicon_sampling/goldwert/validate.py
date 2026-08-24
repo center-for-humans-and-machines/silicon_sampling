@@ -50,9 +50,20 @@ class DryRun:
     answers: dict
 
 
+#: How often the stand-in respondent takes a slider's opt-out instead of
+#: answering on the scale.  Not a calibration target — it is here so that the
+#: dry run actually walks the escape path.  Five live sliders print an opt-out,
+#: and a stand-in that always answers with a number would leave every one of
+#: them untested against exactly the failure they used to have: the option was
+#: printed and the slot refused it.
+ESCAPE_SHARE = 0.25
+
+
 def answer(slot: Slot, rng: random.Random):
     """A legal answer, chosen without a model."""
     if isinstance(slot, IntSlot):
+        if getattr(slot, "escape", "") and rng.random() < ESCAPE_SHARE:
+            return slot.escape
         return rng.randint(slot.lo, slot.hi)
     if isinstance(slot, ChoiceSlot):
         return rng.choice(list(slot.options))
@@ -89,12 +100,19 @@ def dry_run(profile: prof.Profile) -> DryRun:
                 "does not end at 'Response: '"
             )
         value = answer(slot, rng)
-        if slot.parse(str(value)) is None:
+        parsed = slot.parse(str(value))
+        if parsed is None:
             raise AssertionError(
                 f"{profile.profile_id}/{profile.condition}: slot {slot.id!r} rejects "
                 f"its own legal answer {value!r}"
             )
-        session.submit(slot, value)
+        # What is submitted is what the *slot* made of the draw, not the draw, so
+        # this walk stores what a real run would store. For every slot but the
+        # five with an opt-out the two are the same object; for those five the
+        # draw is the escape's own wording and the stored value is the sentinel
+        # that becomes NaN in the frame, so submitting the draw would have hidden
+        # the one path this stand-in was extended to exercise.
+        session.submit(slot, parsed)
         steps += 1
         if steps > 400:  # pragma: no cover - a loop would mean a broken instrument
             raise AssertionError("session did not terminate")

@@ -302,6 +302,49 @@ def visible_text(question: Question, qid_to_slot: dict[str, str]) -> str:
     return resolve_pipes(strip_html(with_images(question.raw_text)), qid_to_slot)
 
 
+def qsf_escape_note(payload: dict) -> tuple[str, str]:
+    """A ``.qsf`` slider's endpoint labels, and the escape box it showed.
+
+    Two things have to be read separately here and reading them as one is a
+    defect.  Qualtrics files the "Not Applicable" checkbox's *wording* under the
+    ``"NA"`` key of ``Labels``, alongside the scale's endpoint labels, and files
+    whether the checkbox was ever *shown* under ``Configuration.NotApplicable``.
+    The two disagree in this instrument: nine ``.qsf`` sliders carry an ``"NA"``
+    label and only five had the box turned on, so ``Enviro_motiv``, ``Enviro_ID``,
+    ``ID_hum`` and ``ID_GC`` have wording for a control the respondent never saw.
+
+    Handing ``Labels`` straight to ``anchors_from_labels`` gets both cases wrong at
+    once.  On those four it prints "Strongly disagree … Strongly agree … Not
+    Applicable", inventing a third scale point out of dead JSON; on the five where
+    the box was real it buries a separate control in the endpoint line instead of
+    naming it as one.  So the flag decides, the label only supplies the words, and
+    the note is worded exactly as the hand-transcribed side words it -- see
+    :func:`_anchor_line` -- because the same screen is reached both ways and the
+    two descriptions of it should not differ.
+
+    None of the four currently reaches a template: every block that shows them is
+    hand-transcribed today.  This is the ``.qsf`` path being made correct before
+    something is routed through it, which is how the same read went wrong in the
+    Goldwert converter.
+    """
+    labels = payload.get("Labels")
+    scale = payload
+    escape = ""
+    if isinstance(labels, dict):
+        scale = {
+            **payload,
+            "Labels": {k: v for k, v in labels.items() if str(k) != "NA"},
+        }
+        entry = labels.get("NA")
+        if isinstance(entry, dict):
+            escape = strip_html(str(entry.get("Display", ""))).strip()
+    if not (payload.get("Configuration") or {}).get("NotApplicable"):
+        escape = ""
+    elif not escape:
+        escape = "Not Applicable"
+    return anchors_from_labels(scale), escape
+
+
 def _slider_slots(
     question: Question, payload: dict, text: str
 ) -> tuple[list, dict[str, str]]:
@@ -311,7 +354,8 @@ def _slider_slots(
     prints the header once and gives each row its statement.
     """
     low, high = slider_bounds(payload)
-    anchors = state_range(anchors_from_labels(payload), low, high)
+    labelled, escape = qsf_escape_note(payload)
+    anchors = _anchor_line(labelled, "", None, escape or None, low, high)
     rows = [
         (label, code)
         for label, code in zip(question.choices, question.codes or question.choices)
@@ -416,7 +460,14 @@ def convert_qsf_block(description: str, path=QSF) -> Converted:
     columns: dict[str, str] = {}
     for entry in state.block_elements[block.bid]:
         if entry.get("Type") == "Page Break":
-            elements.append(PageBreak())
+            # Two page breaks in a row render as a page with nothing on it. This
+            # block is entered with one already emitted, so a block whose own first
+            # element is a Page Break -- arm 3's is -- produced an empty page 4,
+            # the only empty page in the twelve templates. Qualtrics does not show
+            # a blank screen for a doubled break either, so collapsing them is
+            # closer to the instrument, not a cosmetic tidy-up.
+            if not (elements and isinstance(elements[-1], PageBreak)):
+                elements.append(PageBreak())
             continue
         question = state.survey.questions.get(entry.get("QuestionID"))
         if question is None:
@@ -657,6 +708,17 @@ def convert_screens(block: V.Block, page_break: bool = True) -> Converted:
         made, mapped = _screen_elements(screen)
         produced.extend(made)
         columns.update(mapped)
+        if screen.condition and screen.gate is None:
+            # A `condition` on a gated screen becomes the Conditional's note, which
+            # a template prints and a session evaluates. On an *ungated* screen it
+            # used to become nothing at all, and exactly one screen in this
+            # instrument is in that position: the WEPT practice grid, whose
+            # CustomValidation pinned all nine cells and would not let the page
+            # advance until the respondent had ticked {67, 85} and {23, 81}. That
+            # is the only reason the transcript shows a correct answer there rather
+            # than the respondent's own -- the demo answers are prefilled -- so
+            # dropping the sentence left two answers appearing out of nowhere.
+            produced.append(Text(f"[ {screen.condition} ]"))
         if screen.gate is not None:
             elements.append(
                 Conditional(

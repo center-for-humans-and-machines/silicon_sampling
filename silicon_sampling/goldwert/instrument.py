@@ -142,8 +142,11 @@ ARMS: tuple[Arm, ...] = (
         "co_benefits",
         "image_of_text",
         False,
-        "the whole stimulus is one 2282x7768px infographic styled as a social-media "
-        "feed; the 73 words of surrounding text only say to read it",
+        "the whole stimulus is one Qualtrics graphic -- the export calls the file "
+        '"Intervention comb2" and names no host for it, so nobody has seen it -- '
+        "and the 73 words of surrounding text only say to read it. An arm whose "
+        "entire content is an image of text that cannot even be fetched cannot be "
+        "transcribed at all",
         3,
     ),
     Arm(
@@ -189,11 +192,18 @@ ARMS: tuple[Arm, ...] = (
         "ecological_disruptions",
         "text_plus_image",
         True,
-        "long article excerpts plus four images; the reasoning task asks which of "
-        "four unlabelled contributor charts matches a temperature-anomaly curve, so "
-        "all five panels are transcribed and the item is answerable. The row of dead "
-        "songbirds the writing prompt points at is described too",
-        2,
+        "long article excerpts plus four images, all four described. The reasoning "
+        "item asks which of four unlabelled contributor charts matches a "
+        "temperature-anomaly curve, and the four panels are not on its page for "
+        "anyone: the export puts one chart with the question and the five-panel "
+        'IPCC figure on the next page, after the words "Answer: Contributor C". '
+        'The prose on the question page promises "the four graphs below" and the '
+        "survey does not deliver them, so a human guessed there too and the "
+        "transcript reproduces the layout rather than repairing it. What a "
+        "synthetic respondent still misses is the photographs -- the article "
+        "spread and the row of dead songbirds the writing prompt points at -- "
+        "which carry this arm's affect and are described in words",
+        1,
     ),
     Arm(
         8,
@@ -1010,6 +1020,13 @@ def modality_audit() -> list[dict]:
     :mod:`~silicon_sampling.goldwert.images` can put into words, so a claim that an
     arm is safe to keep can be checked against whether its pictures are in the file
     at all.
+
+    ``described`` counts only assets someone opened.  It used to also count the
+    four ``Graphics`` assets for which the export gives no URL, because their
+    entries were phrased as descriptions and sat in the same table as the real
+    ones; ``labelled_from_export`` is now their own column, so a reader can tell
+    "we looked at it" from "we know what the author called the file" without
+    reading :mod:`~silicon_sampling.goldwert.images` to find out which is which.
     """
     rows = []
     for arm in ARMS:
@@ -1041,10 +1058,12 @@ def modality_audit() -> list[dict]:
                 words += len(question.text.split())
                 chars += len(question.text)
         keys = media_keys(arm)
+        labelled = [key for key in keys if key in images.EXPORT_LABEL]
         described = [
             key
             for key in keys
-            if images.describe(key) is not None or key in images.MEDIA_ALT
+            if key not in images.EXPORT_LABEL
+            and (images.describe(key) is not None or key in images.MEDIA_ALT)
         ]
         rows.append(
             {
@@ -1057,7 +1076,8 @@ def modality_audit() -> list[dict]:
                 "media_loss_meaning": MEDIA_LOSS[arm.media_loss],
                 "n_assets": len(keys),
                 "described": len(described),
-                "undescribed": len(keys) - len(described),
+                "labelled_from_export": len(labelled),
+                "undescribed": len(keys) - len(described) - len(labelled),
                 "unrecoverable": sum(1 for key in keys if key in images.UNRECOVERABLE),
                 "reason": arm.reason,
                 "n_blocks": len(descriptions),

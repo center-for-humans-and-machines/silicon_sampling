@@ -285,22 +285,13 @@ IMAGE_ALT: dict[str, str] = {
         'should be doing more to address climate change."'
     ),
     # -- dropped arms, described because the modality audit rests on them --- #
-    # These four never reach a transcript; they are here so that the audit's claim
-    # about each dropped arm can be checked against the picture it is about.
+    # This one never reaches a transcript; it is here so that the audit's claim
+    # about its arm can be checked against the picture it is about. The four other
+    # dropped-arm assets are in EXPORT_LABEL, because nobody has seen them.
     "IM_cwoPQEwiY2j6vWu": (
         "A chart of climate-related health risks accompanying the Lancet global "
         "health frame."
     ),
-    "IM_4VMaSOsNCCFfwmW": (
-        "The Co-Benefits infographic: a single 2282x7768-pixel image styled as a "
-        "scrolling social-media feed, and the entire content of that arm."
-    ),
-    "IM_k3qYGs04M7HJAxb": (
-        "Screenshot 1 of a New York Times article on historical emissions "
-        "responsibility."
-    ),
-    "IM_sizaDz3eLHlk4cR": "Screenshot 2 of the same New York Times article.",
-    "IM_nN9nC8TzJLBAjpD": "Screenshots 3 and 4 of the same article, merged.",
     # -- the shared battery, shown to every arm ---------------------------- #
     # The MacArthur ladder. Also the picture ICPC's own table describes, from the
     # same NYU asset id, because both instruments use the same SES item.
@@ -308,6 +299,42 @@ IMAGE_ALT: dict[str, str] = {
         "A drawing of a grey ten-runged ladder standing upright and leaning slightly "
         "to the left, with no labels on it."
     ),
+}
+
+#: Assets for which there is no file and never was a URL: Qualtrics ``Graphics``
+#: questions whose media library is on a host the export does not name, so the
+#: fetcher recorded ``no-url (Graphics question; host unknown)`` and stopped.
+#:
+#: Kept out of :data:`IMAGE_ALT` for the same reason :data:`UNRECOVERABLE` is kept
+#: out of it, and the reason is worth restating because this table got it wrong
+#: once.  These four entries used to sit in ``IMAGE_ALT`` phrased as descriptions
+#: — "Screenshot 2 of the same New York Times article." — which made
+#: ``modality_audit.csv`` count them ``described`` and made the audit's summary
+#: sentence, "five assets remain undescribed and all five are videos", false in
+#: both halves.  Nobody had opened a file, and the true count with these four
+#: moved out is six, still all videos: one Qualtrics-hosted clip and five YouTube
+#: ids, every one of them in an arm the audit drops precisely because a recorded
+#: talk is its stimulus.  What is actually known is the export's own
+#: ``GraphicsDescription`` field, which is the filename the author uploaded:
+#: ``"NYT Article final_1.png"``, ``"NYT Article final_2.png"``,
+#: ``"NYT Article final_3_4_merged.png"`` and ``"Intervention comb2"``.  Those
+#: filenames are evidence and they are recorded as such; the earlier entry for the
+#: Co-Benefits asset went further and gave its pixel dimensions and visual style,
+#: neither of which is in the export, the ``.docx`` (whose embedded copies are
+#: zero-byte placeholders) or anywhere else in the materials.
+#:
+#: Both arms are dropped, so nothing rendered depends on these; the cost of the
+#: error was to the audit's own bookkeeping, which is the thing the audit exists
+#: to make checkable.
+EXPORT_LABEL: dict[str, str] = {
+    "IM_4VMaSOsNCCFfwmW": (
+        'the export names it "Intervention comb2" and the arm\'s 73 words of '
+        "surrounding text say only to read it, so the infographic is the whole "
+        "stimulus"
+    ),
+    "IM_k3qYGs04M7HJAxb": 'the export names it "NYT Article final_1.png"',
+    "IM_sizaDz3eLHlk4cR": 'the export names it "NYT Article final_2.png"',
+    "IM_nN9nC8TzJLBAjpD": 'the export names it "NYT Article final_3_4_merged.png"',
 }
 
 #: Video and audio assets, keyed by the id or file token the export carries.
@@ -378,5 +405,12 @@ def describe(key: str) -> str | None:
             "picture not recoverable: the file has been deleted from the survey's "
             "media library and answers 404 on every host the export names. From the "
             f"surrounding copy it {' '.join(missing.split())}"
+        )
+    labelled = EXPORT_LABEL.get(key)
+    if labelled is not None:
+        return (
+            "picture never seen: the export gives no URL for it and no copy of the "
+            f"file exists in the materials. All that is known is that "
+            f"{' '.join(labelled.split())}"
         )
     return None

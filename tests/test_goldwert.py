@@ -962,6 +962,301 @@ def test_the_demographic_section_keeps_its_own_screens():
     assert text.count("- - - [ page") >= 6, text.count("- - - [ page")
 
 
+# --------------------------------------------------------------------------- #
+# the opt-out escapes, the stated ranges, and the constant-sum donation
+# --------------------------------------------------------------------------- #
+
+
+def _escapable_slots() -> dict[str, Slot]:
+    return {
+        slot_id: slot
+        for slot_id, slot in run.all_slots().items()
+        if getattr(slot, "escape", "")
+    }
+
+
+def test_every_printed_opt_out_is_an_answer_the_slot_accepts():
+    """A screen that advertises an answer and then refuses it is not a sample.
+
+    Five live sliders print a Qualtrics "Not Applicable" control.  Before
+    :class:`~silicon_sampling.goldwert.convert.EscapableIntSlot` they printed it and
+    parsed it as illegal, so a model that followed the instruction burned four
+    rounds of rejection sampling plus the constrained-decoding fallback and then had
+    ``(lo + hi) // 2`` written into its row -- a forced 50 recorded as if the
+    respondent had chosen the midpoint.  Asserted on the prose the model reads, in
+    both directions: whatever ``describe()`` offers after "Or answer:" has to parse,
+    and whatever parses has to be offered.
+    """
+    slots = _escapable_slots()
+    assert set(slots) == {
+        "pol_candidate",
+        "flyless",
+        "lessbeef",
+        "Politics_Soc",
+        "Politics_Econ",
+    }, sorted(slots)
+    for slot_id, slot in slots.items():
+        described = slot.describe()
+        offered = described.split("Or answer: ", 1)[1].rstrip()
+        assert offered, slot_id
+        # The wording is the survey's own, so it may already end in punctuation;
+        # `describe` adds a full stop only when it does not.
+        assert offered.rstrip(".") in described, slot_id
+        assert slot.parse(slot.escape) == convert.NOT_APPLICABLE, slot_id
+        assert slot.parse(offered) == convert.NOT_APPLICABLE, slot_id
+        for alias in ("Not Applicable", "N/A", "NA"):
+            assert slot.parse(alias) == convert.NOT_APPLICABLE, (slot_id, alias)
+        # And it is still a slider: the escape must not swallow the scale.
+        assert slot.parse("0") == 0 and slot.parse("100") == 100, slot_id
+        assert slot.parse("101") is None, slot_id
+        assert slot.parse("about four, I think") is None, slot_id
+        assert slot.render(convert.NOT_APPLICABLE) == slot.escape, slot_id
+
+
+def test_the_opt_out_wording_is_the_surveys_own_and_not_three_flat_words():
+    """The escape's words told a respondent what the escape was *for*.
+
+    Flattening all five to "Not Applicable." dropped "Not Eligible to Vote", both
+    "I already don't ..." examples, and turned ``Politics2``'s "Prefer not to
+    respond" into a claim the screen never made.
+    """
+    slots = _escapable_slots()
+    assert slots["pol_candidate"].escape == "Not Applicable / Not Eligible to Vote"
+    assert "I already don't fly" in slots["flyless"].escape
+    assert "I already don't eat red meat" in slots["lessbeef"].escape
+    assert slots["Politics_Soc"].escape == "Prefer not to respond"
+    assert slots["Politics_Econ"].escape == "Prefer not to respond"
+
+
+def test_an_opt_out_arrives_in_the_frame_as_missing_and_not_as_fifty():
+    """The escape is where this study's missingness comes from, so it must be NaN.
+
+    ``flylessN`` and ``lessbeefN`` are the only two members of
+    ``lifestyle_changes``, so a sample that records the escape as a number does not
+    merely mis-measure two items, it fills a composite for respondents the study
+    recorded as having no answer to give.  Checked through
+    :func:`~silicon_sampling.goldwert.export.build_frame`, because it is the
+    published coding rather than the parse that has to come out missing.
+    """
+    answers = {
+        "flyless": convert.NOT_APPLICABLE,
+        "lessbeef": convert.NOT_APPLICABLE,
+        "pol_candidate": convert.NOT_APPLICABLE,
+        "donation": 4,
+        "donation_keep": 6,
+    }
+    frame = export.build_frame(
+        [{"profile_id": "g00001", "condition": instrument.CONTROL, "answers": answers}]
+    )
+    row = frame.iloc[0]
+    for column in ("flyless", "lessbeef", "pol_candidate"):
+        assert pd.isna(pd.to_numeric(pd.Series([row[column]]), errors="coerce")[0])
+    for column in ("flylessN", "lessbeefN", "pol_candidateN", "lifestyle_changes"):
+        assert pd.isna(row[column]), column
+    # A midpoint would have produced 0.5 here, which is the bug this pins.
+    assert row["lifestyle_changes"] != 0.5
+
+
+def test_no_rendered_integer_position_hides_its_range():
+    """The regression test for the defect that cost this study its first run.
+
+    The slider convention printed the endpoint labels and nothing else, which is
+    faithful to a screen that also showed a 0-100 track and useless to a model that
+    cannot see one: 80% to 94% of every 0-100 answer came back as an integer of ten
+    or less against 8% to 31% for real participants, and mean control-arm level
+    error ran 20 to 47 points.  A missing sentence looks like a shorter sentence, so
+    nothing in a template read wrong.
+
+    Asserted on the **rendered prose** rather than on ``slot.anchors``, because the
+    prose is what a model reads and because the two can disagree.  Both halves are
+    checked -- the range is stated, and it is stated *once*: the bipolar slider's
+    ``describe`` used to append its own range sentence to an ``anchors`` string that
+    already carried one, and the render read "Whole number from -100 to 100.  Whole
+    number from -100 to 100; negative answers are allowed."  The bounds are read off
+    the marker rather than assumed, so a slot whose prose states somebody else's
+    range fails too.
+    """
+    checked = 0
+    for path in sorted(paths.TEMPLATES.glob("*.txt")):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for index, line in enumerate(lines):
+            found = re.match(r"Response: <<[^:]+ :: int :: (-?\d+)\.\.(-?\d+)", line)
+            if not found:
+                continue
+            prose = lines[index - 1]
+            stated = f"from {found.group(1)} to {found.group(2)}"
+            assert prose.count(stated) == 1, (path.name, index + 1, prose)
+            checked += 1
+    # Every integer position in all eleven templates, not a sample of them.
+    assert checked == 304, checked
+
+
+def test_no_render_leaks_a_broken_html_tag():
+    """``strip_html`` matches ``<...>``, and one label in this survey has no ``>``.
+
+    The emotion battery's third row is stored as ``<span ...>Inspired</span></span``
+    with the last bracket missing, so the shared stripper took the two well-formed
+    tags and left the third, and ``Q11. Inspired</span`` went to the model as the
+    text of a live matrix row.
+    """
+    for path in sorted(paths.TEMPLATES.glob("*.txt")):
+        text = path.read_text(encoding="utf-8")
+        for stray in ("</span", "<span", "<div", "<br", "&nbsp", "<img", "<p>"):
+            assert stray not in text, (path.name, stray)
+
+
+def test_the_donation_pair_is_reconciled_and_the_drawn_pair_is_kept():
+    """The survey refused a page whose two boxes did not total ten; we cannot.
+
+    All 23,732 non-null human rows total exactly ten, because Qualtrics would not
+    accept anything else.  The driver samples one slot at a time and has no way to
+    hold a constraint across two, so the pair is reconciled on the recorded row in
+    favour of ``donation`` -- the scored outcome -- and the drawn second box and a
+    per-row coherence flag are both published so the rows that needed help can be
+    found.  They are the rows whose ``donation`` is least trustworthy.
+    """
+    records = [
+        {
+            "profile_id": "g1",
+            "condition": instrument.CONTROL,
+            "answers": {"donation": 7, "donation_keep": 3},
+        },
+        {
+            "profile_id": "g2",
+            "condition": instrument.CONTROL,
+            "answers": {"donation": 7, "donation_keep": 7},
+        },
+        {
+            "profile_id": "g3",
+            "condition": instrument.CONTROL,
+            "answers": {"donation": 0, "donation_keep": 0},
+        },
+    ]
+    frame = export.build_frame(records).set_index("profile_id")
+    assert list(frame["donation"]) == [7, 7, 0]
+    assert list(frame["donation_keep"]) == [3, 3, 10]
+    assert list(frame[export.DONATION_DRAWN]) == [3, 7, 0]
+    assert list(frame[export.DONATION_COHERENT]) == [1, 0, 0]
+    # Reconciliation does not touch the scored outcome, which is the point of the
+    # flag: g3 still records "donated nothing".
+    assert frame.loc["g3", "donation_bin"] == 0
+    assert frame.loc["g3", "donationN"] == 0.0
+
+
+def test_the_build_summary_reports_both_of_the_rates_we_cannot_match(tmp_path):
+    """``letter`` and ``newsletter`` are the two columns filled by a rule of ours.
+
+    Both departures have a known sign and neither is visible in ``samples.csv``
+    alone, so the build prints them.  ``newsletter`` had neither a rate nor a
+    counterpart to ``letter_contribution`` before this.
+    """
+    built = profiles.build(seed=11, per_arm=1)
+    meta = _stub_sample(tmp_path, built)
+    del meta
+    summary = export.build_csvs(tmp_path)
+    for key in (
+        "letter_rate",
+        "newsletter_rate",
+        "human_newsletter_rate_reached",
+        "human_newsletter_rate_all_rows",
+        "donation_sums_to_ten",
+        "donation_reconciled_rows",
+    ):
+        assert key in summary, key
+    assert 0.0 <= summary["newsletter_rate"] <= 1.0
+    assert (
+        summary["human_newsletter_rate_reached"]
+        > summary["human_newsletter_rate_all_rows"]
+    )
+    frame = pd.read_csv(tmp_path / "samples.csv")
+    assert export.DONATION_COHERENT in frame.columns
+    assert export.DONATION_DRAWN in frame.columns
+
+
+def test_newsletter_contribution_measures_the_attrition_it_cannot_reproduce():
+    """``newsletter`` is scored twice and zero-filled, and the sign is knowable.
+
+    Reach is lowest in the control arm, so an intervention that merely kept people
+    in the survey raised its own all-rows mean.  The numbers pinned here are the
+    ones quoted in the module docstrings, which is the point of pinning them.
+    """
+    table = score.newsletter_contribution()
+    row = table.iloc[0]
+    assert row["n_rows"] == 19141 and row["n_reached_page"] == 15001
+    assert row["human_rate_all_rows"] == 0.2495
+    assert row["human_rate_reached_page"] == 0.3183
+    assert row["reach_control"] == 0.6924
+    assert (
+        row["reach_min_treatment"] < row["reach_control"] < row["reach_max_treatment"]
+    )
+    assert row["ate_inflation"] > 1.9
+    assert row["n_arms_sign_flipped"] == 4
+    assert row["r_ate"] < 0.5
+    # Worse than the item the audit spent a whole section on.
+    assert row["r_ate"] < score.letter_contribution().iloc[0]["r_ate"]
+
+
+def test_an_asset_nobody_opened_is_not_counted_as_described():
+    """``described`` has to mean "someone looked at it" or it settles nothing.
+
+    Four ``Graphics`` assets have no URL in the export and no copy in the
+    materials, and their entries used to sit in ``IMAGE_ALT`` phrased as
+    descriptions -- "Screenshot 2 of the same New York Times article." -- so the
+    audit counted them ``described`` and its own summary line about undescribed
+    assets was false.  They are now in ``EXPORT_LABEL`` and in a column of their
+    own.
+    """
+    from silicon_sampling.goldwert import images
+
+    assert set(images.EXPORT_LABEL) == {
+        "IM_4VMaSOsNCCFfwmW",
+        "IM_k3qYGs04M7HJAxb",
+        "IM_sizaDz3eLHlk4cR",
+        "IM_nN9nC8TzJLBAjpD",
+    }
+    assert not set(images.EXPORT_LABEL) & set(images.IMAGE_ALT)
+    for key in images.EXPORT_LABEL:
+        assert "never seen" in images.describe(key)
+    rows = {row["condName"]: row for row in instrument.modality_audit()}
+    assert rows["CoBenefits"]["described"] == 0
+    assert rows["CoBenefits"]["labelled_from_export"] == 1
+    assert rows["GuiltCollResponsibility"]["described"] == 0
+    assert rows["GuiltCollResponsibility"]["labelled_from_export"] == 3
+    # Every asset still unaccounted for anywhere is a video in a dropped arm.
+    unaccounted = [
+        (arm.name, key)
+        for arm in instrument.ARMS
+        for key in instrument.media_keys(arm)
+        if key not in images.EXPORT_LABEL
+        and images.describe(key) is None
+        and key not in images.MEDIA_ALT
+    ]
+    assert len(unaccounted) == 6, unaccounted
+    assert all(not instrument.BY_NAME[name].usable for name, _ in unaccounted)
+
+
+def test_the_ecological_disruptions_reason_does_not_claim_an_answerable_item():
+    """The four contributor panels are not on the page the item is asked on.
+
+    ``QID1718818890`` carries one ``<img>``, the single-panel temperature chart; the
+    five-panel IPCC figure is on the next page with "Answer: Contributor C".  The
+    render reproduces that, faithfully, and the arm's reason used to say the
+    opposite -- "all five panels are transcribed and the item is answerable" -- with
+    a ``media_loss`` of 2 resting on it.
+    """
+    arm = instrument.BY_NAME["EcologicalDisruptions"]
+    assert "the item is answerable" not in arm.reason
+    assert "not on its page for anyone" in arm.reason
+    assert arm.media_loss == 1
+    text = (paths.TEMPLATES / "07_ecological_disruptions.txt").read_text(
+        encoding="utf-8"
+    )
+    question = text.index("which contributor do you think is the strongest")
+    panels = text.index("Below it four smaller panels")
+    answer = text.index("Answer: Contributor C.")
+    assert question < answer < panels
+
+
 def main() -> int:
     # The sampling checks take pytest's tmp_path fixture; under the plain runner
     # they are each handed a scratch directory of their own instead.
@@ -990,3 +1285,39 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_the_letter_box_says_the_zipcode_box_is_a_different_question():
+    """Serialising a page destroys the simultaneity its prompts rely on.
+
+    Q6 asks what the respondent would say to their representative and ends
+    "please include your zipcode below" — which, on a page showing every box at
+    once, plainly pointed at the separate Q7 zipcode field. Read one question at a
+    time it is an instruction about the box being answered, and the models obeyed
+    it: `letter_content` came back with a median length of 5 characters, 79-84% of
+    answers under 40, and V4-Flash's first five answers were 08512, 90001, 11804,
+    88011, 97070. `letter` is a member of the `political_advocacy` composite, so
+    this was scored.
+    """
+    from silicon_sampling.goldwert import paths as gpaths
+
+    control = (gpaths.TEMPLATES / "00_control.txt").read_text()
+    letter_at = control.index("letter_content ::")
+    zip_at = control.index("zipcode_1 ::")
+    page_start = control.rindex("- - - [ page", 0, letter_at)
+    page_end = control.index("- - - [ page", letter_at)
+
+    # the two boxes really are on one page, which is what makes the note necessary
+    assert page_start < letter_at < zip_at < page_end
+
+    prompt = control[page_start:letter_at]
+    assert "zipcode" in prompt, "the prompt that needs the note has changed"
+    assert "separate question on this same page" in prompt
+
+
+def test_the_same_page_note_only_fires_where_it_is_declared():
+    from silicon_sampling.goldwert import convert
+
+    assert convert.same_page_note("letter_content")
+    assert convert.same_page_note("zipcode_1") == ""
+    assert convert.same_page_note("nothing_like_this") == ""

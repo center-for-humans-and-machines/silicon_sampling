@@ -583,8 +583,11 @@ def test_every_slider_states_the_range_a_legal_answer_falls_in():
                 slot.id,
                 slot.anchors,
             )
-    # 257 sliders across the twelve arms, plus the two text boxes Qualtrics
-    # validated as numbers (see the number-box test below).
+    # 245 slider positions across the twelve arms, plus the 12 `Age` boxes (one
+    # per arm, prefilled but still an integer position) and the two text boxes
+    # Qualtrics validated as numbers -- see the number-box test below. The earlier
+    # comment here read "257 sliders ... plus the two text boxes", which reached
+    # the right total by counting `Age` as a slider.
     assert total == 259, total
 
 
@@ -1270,3 +1273,167 @@ def test_transcripts_tokenise_incrementally():
             prompts.append(step[0])
             session.submit(step[1], icpc_run.widest_answer(step[1]))
         verify(tokenizer, prompts)
+
+
+# --------------------------------------------------------------------------- #
+# the range statement, the escape flag, and three screens that went missing
+# --------------------------------------------------------------------------- #
+
+
+@requires_qsf
+def test_no_rendered_integer_position_hides_its_range():
+    """The same regression guard as above, on the prose instead of on the slot.
+
+    ``test_every_slider_states_the_range_a_legal_answer_falls_in`` reads
+    ``slot.anchors``, which is where the sentence is *built*.  This one reads the
+    rendered template, which is where a model *sees* it, and the two can disagree:
+    a ``describe()`` override can append to ``anchors``, drop it, or state a range
+    that is not the slot's own, and none of that shows up in an anchors check.  The
+    defect being guarded is the one that cost this study its first run -- 80% to 94%
+    of every 0-100 answer came back as an integer of ten or less against 8% to 31%
+    for real participants -- and it is guarded twice because a missing sentence
+    looks like a shorter sentence.
+
+    Bounds come off the marker, so a position stating somebody else's range fails,
+    and the count has to be exactly one, so a doubled statement fails as well.
+    """
+    checked = 0
+    for arm in inst.ARMS:
+        text = render_template(inst.header("p00001", arm), inst.assemble(arm).elements)
+        lines = text.splitlines()
+        for index, line in enumerate(lines):
+            found = re.match(r"Response: <<[^:]+ :: int :: (-?\d+)\.\.(-?\d+)", line)
+            if not found:
+                continue
+            prose = lines[index - 1]
+            stated = f"from {found.group(1)} to {found.group(2)}"
+            assert prose.count(stated) == 1, (arm.key, index + 1, prose)
+            checked += 1
+    # 245 slider positions, 12 `Age` boxes, 2 Qualtrics-validated threshold boxes.
+    assert checked == 259, checked
+
+
+@requires_qsf
+def test_the_qsf_escape_note_follows_the_flag_and_not_the_label():
+    """A slider can carry an ``NA`` label with the box switched off.
+
+    Nine ``.qsf`` sliders have a ``Labels["NA"]`` entry and only five had
+    ``Configuration.NotApplicable`` on, so handing ``Labels`` straight to
+    ``anchors_from_labels`` invents a third scale point on ``Enviro_motiv``,
+    ``Enviro_ID``, ``ID_hum`` and ``ID_GC`` and buries a real separate control
+    inside the endpoint line on the other five.  The flag decides; the label only
+    supplies the words.
+
+    The words are then cross-checked against the hand-transcribed side, which
+    reached the same screens independently: if the two ever disagree, one of them
+    is describing a screen that did not exist.
+    """
+    state = inst.loaded()
+    labelled = 0
+    escapes = {}
+    for qid, payload in state.payloads.items():
+        if payload.get("QuestionType") != "Slider":
+            continue
+        labels = payload.get("Labels")
+        if not (isinstance(labels, dict) and "NA" in labels):
+            continue
+        labelled += 1
+        anchors, escape = convert.qsf_escape_note(payload)
+        assert "Applicable" not in anchors and "Opinion" not in anchors, qid
+        assert "Prefer not" not in anchors, qid
+        tag = state.survey.questions[qid].export_tag
+        escapes[tag] = escape
+    assert labelled == 9, labelled
+    # And the converter uses the flag, not just exposes it: an `NA` label with the
+    # box off must not reach the slider's own prose line either.
+    for qid, payload in state.payloads.items():
+        if payload.get("QuestionType") != "Slider":
+            continue
+        labels = payload.get("Labels")
+        if not (isinstance(labels, dict) and "NA" in labels):
+            continue
+        question = state.survey.questions[qid]
+        produced, _ = convert.convert_question(question, payload, {})
+        anchors = {slot.anchors for slot in produced if getattr(slot, "anchors", None)}
+        assert anchors, question.export_tag
+        wording = convert.qsf_escape_note(payload)[1]
+        for line in anchors:
+            assert ("the screen also offered" in line) == bool(wording), (
+                question.export_tag,
+                line,
+            )
+            if wording:
+                assert f"'{wording}' box" in line, (question.export_tag, line)
+            else:
+                assert "Applicable" not in line, (question.export_tag, line)
+    assert escapes["CC_policy"] == "Not Applicable"
+    assert escapes["Politics2"] == "Prefer not to respond"
+    for tag in ("Trust_sci1", "Trust_sci2", "Trust_gov"):
+        assert escapes[tag] == "No Opinion", tag
+    for tag in ("Enviro_motiv", "Enviro_ID", "ID_hum", "ID_GC"):
+        assert escapes[tag] == "", tag
+
+
+@requires_qsf
+def test_no_template_renders_a_page_with_nothing_on_it():
+    """A page break emitted twice is a screen the respondent never saw.
+
+    ``convert_qsf_block`` opens with a ``PageBreak`` and then emits one per
+    ``Page Break`` element, so a block whose own first element is a page break --
+    arm 3's is -- produced an empty page 4, the only empty page in the twelve
+    templates.  Checked across all twelve rather than on arm 3, because the cause is
+    the block boundary and any arm can acquire one.
+    """
+    for arm in inst.ARMS:
+        text = render_template(inst.header("p00001", arm), inst.assemble(arm).elements)
+        lines = text.splitlines()
+        rules = [
+            i for i, line in enumerate(lines) if line.strip().startswith("- - - [")
+        ]
+        for start, stop in zip(rules, rules[1:] + [len(lines)]):
+            body = [line for line in lines[start + 1 : stop] if line.strip()]
+            assert body, (arm.key, lines[start])
+
+
+@requires_qsf
+def test_the_wept_practice_screen_says_it_could_not_be_got_wrong():
+    """The practice grid was forced-correct, and that is why its answer is filled in.
+
+    ``WEPTdemo1`` and ``WEPTdemo2`` are the only two questions in the ``.qsf`` with
+    ``CustomValidation``: a nine-term ``And`` chain per item pinning every cell, so
+    the page would not advance until the respondent had ticked exactly ``{67, 85}``
+    and ``{23, 81}``.  Those answers are prefilled from
+    :data:`~silicon_sampling.icpc.profiles.WEPT_DEMO_ANSWERS`, and without the
+    sentence the transcript showed two correct answers appearing from nowhere.  The
+    sentence lived on ``Screen.condition``, which ``convert_screens`` used only for
+    *gated* screens, so it reached neither a template nor a session.
+    """
+    sentence = "could not be advanced until both rows were answered correctly"
+    for arm in inst.ARMS:
+        text = render_template(inst.header("p00001", arm), inst.assemble(arm).elements)
+        assert sentence in text, arm.key
+    # And it survives into a driven session, which block notes do not.
+    walked = validate.dry_run(profiles.build(seed=5, per_arm=1)[0])
+    assert sentence in walked.transcript
+
+
+@requires_qsf
+def test_the_panel_record_says_where_it_came_from_in_a_driven_session():
+    """A caveat only a human reads is a caveat the model does not have.
+
+    The panel record is our own addition -- this instrument asks its demographics
+    last, so a respondent walking it in order knows nothing about itself until after
+    every outcome -- and it said so in the block's ``note``.  ``Session.transcript()``
+    strips block notes, so a driven session went from the file header straight to
+    ``PARTICIPANT PANEL RECORD`` and the model saw seven answered questions with no
+    account of why they were answered.
+    """
+    walked = validate.dry_run(profiles.build(seed=5, per_arm=1)[0])
+    assert "PARTICIPANT PANEL RECORD" in walked.transcript
+    assert inst.PANEL_PROVENANCE in walked.transcript
+    # The block note is still there for a template reader, and still stripped.
+    text = render_template(
+        inst.header("p00001", inst.ARMS[0]), inst.assemble(inst.ARMS[0]).elements
+    )
+    assert "not a screen the participant filled in here" in text
+    assert "not a screen the participant filled in here" not in walked.transcript

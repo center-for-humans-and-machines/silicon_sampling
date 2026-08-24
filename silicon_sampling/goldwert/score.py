@@ -319,6 +319,97 @@ def letter_contribution(frame: pd.DataFrame | None = None) -> pd.DataFrame:
     )
 
 
+def newsletter_contribution(frame: pd.DataFrame | None = None) -> pd.DataFrame:
+    """How much of ``newsletter`` is differential attrition rather than signup.
+
+    The counterpart to :func:`letter_contribution`, and it needed writing for the
+    same reason: ``newsletter`` is a *zero-filled* column.  The published file
+    marks a signup 1, a refusal 0, and the 4,140 of 19,141 kept-arm respondents
+    who never reached the signup form 0 as well, because ``newsletter`` is
+    constructed as the OR of two items that are themselves missing for anyone who
+    dropped out.  Unlike ``letter`` there is nothing wrong with our *measurement*
+    — the two signup questions are ordinary yes/no items and a sampled respondent
+    answers them as well as a real one — so this is not a coding problem.  It is
+    an estimand problem, and it is worse.
+
+    ``letter`` at least sits inside a four-member composite.  ``newsletter`` is a
+    standalone member of :data:`~silicon_sampling.goldwert.outcomes.SCORED` at
+    weight 1.0 *and* one of the four in ``public_awareness``, so the attrition is
+    scored twice, and :func:`effects` takes the all-rows mean both times.
+
+    What the table says, and why the direction is knowable.  Reach is *lowest* in
+    the control arm (69.2%) and higher in nine of the ten treatments (up to 83.3%
+    for ``HopeAngerNarratives``), so an intervention that kept people in the
+    survey raised its own all-rows mean without persuading anyone to sign up.  The
+    zero-fill therefore inflates the mean absolute arm effect by 1.95x, from
+    0.0191 to 0.0372, and it flips the sign on four of the ten arms —
+    ``MispCorrectionRisks`` +0.0405 -> -0.0006, ``HopeAngerNarratives`` +0.0397 ->
+    -0.0048, ``IndStructuralChange`` +0.0160 -> -0.0230, ``EcologicalDisruptions``
+    +0.0151 -> -0.0252.  The two sets of arm effects correlate r = 0.4526
+    (Spearman 0.6121), below ``letter``'s 0.8212.
+
+    **The remaining bias, plainly.**  A silicon sample has reach 1.0 by
+    construction; it cannot drop out and it cannot be made to.  So it estimates
+    the reach-conditional effect, and it is scored against the all-rows one.  The
+    direction is *attenuation*, by about a factor of two on average, plus a
+    wrong-signed prediction on those four arms — and a level that sits about +0.07
+    high, 0.3183 against 0.2495, because our respondents are all reachers and
+    reachers sign up more.  None of that is fixable inside a transcript: making it
+    right would mean fabricating dropout, and conditioning the human side on reach
+    instead trades the bias for a collider, exactly as it does for ``letter``,
+    since the control arm's reachers are the most selected group in the study.
+    The honest move is to report both columns and read every ``newsletter`` and
+    ``public_awareness`` result knowing which one it was scored on.
+    """
+    humans = load_humans() if frame is None else frame
+    reached = humans["newsletter1_timing"].notna()
+    all_rows = humans.groupby("condition")["newsletter"].mean()
+    conditional = humans[reached].groupby("condition")["newsletter"].mean()
+    all_ate = (all_rows - all_rows[CONTROL]).drop(CONTROL)
+    conditional_ate = (conditional - conditional[CONTROL]).drop(CONTROL)
+    reach = humans.assign(_reached=reached).groupby("condition")["_reached"].mean()
+    flipped = [
+        arm
+        for arm in all_ate.index
+        if np.sign(all_ate[arm]) != np.sign(conditional_ate[arm])
+    ]
+    return pd.DataFrame(
+        [
+            {
+                "n_rows": len(humans),
+                "n_reached_page": int(reached.sum()),
+                "human_rate_all_rows": round(float(humans["newsletter"].mean()), 4),
+                "human_rate_reached_page": round(
+                    float(humans.loc[reached, "newsletter"].mean()), 4
+                ),
+                "level_bias_of_reach_one": round(
+                    float(
+                        humans.loc[reached, "newsletter"].mean()
+                        - humans["newsletter"].mean()
+                    ),
+                    4,
+                ),
+                "reach_control": round(float(reach[CONTROL]), 4),
+                "reach_min_treatment": round(float(reach.drop(CONTROL).min()), 4),
+                "reach_max_treatment": round(float(reach.drop(CONTROL).max()), 4),
+                "r_ate": round(float(all_ate.corr(conditional_ate)), 4),
+                "rho_ate": round(
+                    float(all_ate.corr(conditional_ate, method="spearman")), 4
+                ),
+                "mean_abs_ate_all_rows": round(float(all_ate.abs().mean()), 4),
+                "mean_abs_ate_reach_conditional": round(
+                    float(conditional_ate.abs().mean()), 4
+                ),
+                "ate_inflation": round(
+                    float(all_ate.abs().mean() / conditional_ate.abs().mean()), 3
+                ),
+                "n_arms_sign_flipped": len(flipped),
+                "arms_sign_flipped": "|".join(sorted(flipped)),
+            }
+        ]
+    )
+
+
 def control_levels(frame: pd.DataFrame | None = None) -> pd.DataFrame:
     """Control-arm level for every scored outcome: what a sample has to hit first.
 

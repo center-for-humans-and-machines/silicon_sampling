@@ -322,6 +322,9 @@ def main(argv: list[str] | None = None) -> int:
         print()
         print("What `letter` does to political_advocacy (the one uncodeable item)")
         print(score.letter_contribution(humans).to_string(index=False))
+        print()
+        print("What differential attrition does to `newsletter` and public_awareness")
+        print(score.newsletter_contribution(humans).T.to_string(header=False))
         if args.out:
             out = Path(args.out)
             out.mkdir(parents=True, exist_ok=True)
@@ -330,6 +333,9 @@ def main(argv: list[str] | None = None) -> int:
             score.control_levels(humans).to_csv(out / "control_levels.csv", index=False)
             score.letter_contribution(humans).to_csv(
                 out / "letter_contribution.csv", index=False
+            )
+            score.newsletter_contribution(humans).to_csv(
+                out / "newsletter_contribution.csv", index=False
             )
             print(f"\nwrote {out}")
         return 0

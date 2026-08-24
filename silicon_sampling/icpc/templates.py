@@ -112,9 +112,13 @@ times in the 8,253 real US respondents.
 - **Every 0-100 slider states its range** on the prose line, as `Whole number from
   0 to 100.` after the endpoint labels. The endpoint labels alone are what the
   respondent saw, and they are also what left the models answering on a 0-10
-  scale; the range is stated on all 257 sliders and
+  scale. It is stated on all 245 slider positions across the twelve arms, and on
+  the 14 number boxes too — 12 `Age` boxes and the 2 Qualtrics-validated threshold
+  boxes — for 259 integer positions in total.
   `tests/test_icpc.py::test_every_slider_states_the_range_a_legal_answer_falls_in`
-  keeps it that way.
+  asserts it on the slot and
+  `test_no_rendered_integer_position_hides_its_range` asserts it again on the
+  rendered prose, which is the form a model actually reads.
 - **The escape box is stated only where Qualtrics displayed one.** A Qualtrics
   slider can carry an `NA` *label* without the box being switched on
   (`Configuration.NotApplicable`), so the two are not the same question. The nine
