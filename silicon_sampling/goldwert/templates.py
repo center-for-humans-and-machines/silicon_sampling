@@ -28,22 +28,39 @@ model. See `data/pfander/text_templates/00_FORMAT.md` for the marker vocabulary.
 
 **Eleven of eighteen arms are here.** Five are built around a video and two around
 a screenshot of a newspaper article, and neither can go into a text transcript
-without inventing content. The keep-or-drop call for every arm, its reason and its
-media counts are in `modality_audit.csv`. The control is kept even though its only
-content is a five-minute knot-tying video: that video is semantically null, so a
-content-free control screen is a faithful rendering rather than a gap.
+without inventing content. The keep-or-drop call for every arm, its reason, its
+media counts and a 0-3 `media_loss` grade are in `modality_audit.csv`; the grade
+exists so that "do models do worse on media-heavy arms?" can be asked as a
+regression rather than as an impression.
 
-**Media that remains is marked, not deleted.** Nine of the eleven kept arms still
-show a photograph or a chart beside prose that already states what the picture
-states, so the transcript carries a bracketed line — `[ image shown here — not
-reproduced ]` — where one was displayed. The line repeats a caption or an alt text
-only when Qualtrics stored one and never describes a picture, because nothing in
-this pipeline has looked at one. The same line distinguishes the live third-party
-panels four of the nine outcome pages are built on: the petition is an
-Environmental Defense Fund action page, the two newsletter signups are the
-organisations' own subscribe forms, and the bank score is a lookup on
-`bank.green`. Those the respondent acted *inside*, which is why they are described
-as panels and not as images.
+**The control is kept, and its screen is not blank.** Its only content is a
+five-minute knot-tying video, and that video's *content* is null — which is why the
+arm is usable. But real control participants spent five minutes being asked to
+concentrate on something before they reached the outcome battery, and a synthetic
+respondent handed the battery straight away is not an untreated respondent, they
+are a differently-treated one. Every effect in this study is a contrast against
+this arm, so the screen says what it was: the video's title, its length, its
+subject, and that the page would not advance until it had finished.
+
+**Media that remains is described, not marked.** Nine of the eleven kept arms show
+photographs, charts or diagrams, and the transcript carries what each one showed —
+`[ image shown here: A photograph of ... ]` — written from the file.
+`data/Goldwert/Materials/stimuli` holds the pictures themselves, fetched from the
+hosts the exports hot-link, with `index.json` recording provenance per file, and
+`silicon_sampling/goldwert/images.py` holds the descriptions. This replaced a
+content-free `[ image shown here — not reproduced ]` note, which was honest about
+having looked at nothing and wrong about the consequence: two screens of
+`ThreatInjustEfficacy` have no content except photographs and rendered as nothing
+but brackets, and `BindingMorals` asks how impure the Great Smoky Mountains look
+"in the picture on the right above". Six files have been deleted from their media
+libraries and 404 on every host; those say so, and name what the surrounding copy
+says they showed.
+
+The same line distinguishes the live third-party panels four of the nine outcome
+pages are built on: the petition is an Environmental Defense Fund action page, the
+two newsletter signups are the organisations' own subscribe forms, and the bank
+score is a lookup on `bank.green`. Those the respondent acted *inside*, which is
+why they are described as panels and not as images.
 
 **The outcome battery was reconstructed.** The authors published one Qualtrics
 export per arm rather than one survey. Two of those exports are exports of the
@@ -74,13 +91,36 @@ shows both the hope and the anger narrative, and `MispCorrectionRisks` shows all
 six correction pages; in both cases the survey randomises the order, not the
 selection. Templates show one drawn order.
 
-**`MispCorrectionRisks` holds its content in the survey flow.** Its six correction
-paragraphs — about 700 words, the whole substance of the intervention — are
-`EmbeddedData` values in the flow, displayed through `${e://Field/employment_text}`
-pipes. They are resolved here. Fields the flow declares without a value are set at
-runtime from the respondent's own answer and stay as `<<=field>>` echoes: `text`
-and `col` are the correct/incorrect feedback, and `img` is whichever of six charts
-the respondent's own choice selects.
+Which blocks move is read from the `BlockRandomizer` node of the arm's own flow,
+not from a count. Counting them and shuffling that many blocks off the end of the
+list is what the first version did, and for `MispCorrectionRisks` — nine live
+blocks, a randomiser over blocks two to seven — that shuffled the last four
+corrections together with the writing prompt and the closing debrief, so the page
+summarising all six corrections could appear after only two of them. `FL_34_DO`
+and `FL_62_DO` in the published file record each real respondent's own draw and
+confirm that only the six corrections, and only the two narratives, ever moved.
+
+**`MispCorrectionRisks` holds its content in the survey flow, and its page script
+holds the rest.** Its six correction paragraphs — about 700 words, the whole
+substance of the intervention — are `EmbeddedData` values in the flow, displayed
+through `${e://Field/employment_text}` pipes, and are resolved here. Five more
+fields the flow declares without a value were written by the live page script, and
+those are reproduced rather than stubbed, because the export holds both the values
+and the rules:
+
+* `Question N out of 6` counts up with the drawn order. The flow sets `n` to 1 once
+  and the script increments it per screen, so resolving it from the flow alone
+  headed all six screens "Question 1 out of 6".
+* `text` is the "That's correct!" / "That's incorrect!" line. Both strings are flow
+  literals and the recode table on each question says which answer earns which.
+  A template shows it as `<<=..._feedback>>` — one field per screen, not one
+  shared by six, because a session re-renders the whole transcript at every step
+  and a shared field lets a later answer rewrite an earlier screen.
+* `choice_text` and `img` are the correction paragraph and photograph for whichever
+  issue the respondent named as most disruptive, on the page that then asks them to
+  write about it. Both are flow literals selected by the recode value of that
+  choice.
+* `col` stays empty: it is a hex colour in a `style` attribute.
 
 **`IndStructuralChange` echoes the respondent back at themselves**: "You guessed
 32% … the actual number is 18%" appears as an `<<=...>>` echo of the slot holding
@@ -104,6 +144,16 @@ overwriting a real outcome.
 
 **Consent and both attention checks are pre-filled as passed.** The published file
 contains only respondents who passed them.
+
+**Known remaining gaps.** Four questions randomise their *options* rather than
+their order of appearance — the gender item, the two political-orientation slider
+rows, `MispCorrectionRisks`'s eight-way EPA multi-select and
+`EcologicalDisruptions`'s six-row affect matrix — and the transcript shows one fixed
+order for each. All four are either pre-filled from the profile or
+intervention-internal, so nothing scored moves. The debrief screen that followed the
+demographics is not rendered; it comes after the last response position, so no
+answer can depend on it. `Gender_4_TEXT`, the free-text box behind the gender item's
+"other", has no slot, because gender is supplied from the profile.
 
 ## Two scales to distrust
 
@@ -176,12 +226,14 @@ def render_all(out_dir=TEMPLATES, seed: int = 0) -> dict:
             name: {"scale_max": scale, "label": oc.LABELS.get(name, name)}
             for name, scale in oc.SCORED.items()
         },
+        "media_loss_scale": inst.MEDIA_LOSS,
         "unscored_by_design": {
             "belief_1": "reverse-labelled slider, no party gap, unreported by the paper",
             "policy_1": "reverse-labelled slider, no party gap, unreported by the paper",
             "bankscore": "requires looking up the respondent's own real bank on a live site",
         },
         "composites": {name: list(parts) for name, parts in oc.COMPOSITES.items()},
+        "political_advocacy_no_letter": list(oc.LETTER_FREE),
         "sources": {
             "master_qsf": {"path": MASTER_QSF.name, "sha256": _digest(MASTER_QSF)},
             "responses_csv": {
@@ -197,6 +249,8 @@ def render_all(out_dir=TEMPLATES, seed: int = 0) -> dict:
             "cond": arm.cond,
             "modality": arm.modality,
             "usable": arm.usable,
+            "media_loss": arm.media_loss,
+            "media_loss_meaning": inst.MEDIA_LOSS[arm.media_loss],
             "reason": arm.reason,
             "qsf": arm.qsf,
             "words": row["words"],
@@ -209,6 +263,10 @@ def render_all(out_dir=TEMPLATES, seed: int = 0) -> dict:
                     "video",
                     "iframe",
                     "audio",
+                    "n_assets",
+                    "described",
+                    "undescribed",
+                    "unrecoverable",
                 )
             },
         }

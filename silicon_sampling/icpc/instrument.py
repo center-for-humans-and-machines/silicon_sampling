@@ -218,8 +218,16 @@ def extras_order(rng: random.Random) -> list[str]:
 #: The fix is the standard one and it is stated rather than smuggled: a panel
 #: record, printed above the consent form, carrying exactly the fields the panel
 #: supplier knew before the session began.  It is **not part of the instrument**,
-#: it is marked as such on the page, and ``assemble(..., panel_header=False)``
-#: renders the instrument without it for anyone who wants the unmodified thing.
+#: and ``assemble(..., panel_header=False)`` renders the instrument without it for
+#: anyone who wants the unmodified thing.
+#:
+#: What it is *not* is labelled as an addition in the transcript a model reads.
+#: The block's note says so, and the note reaches the rendered template — but
+#: ``Session.transcript()`` strips block notes, exactly as it strips the ``<<?if``
+#: markers, so a driven session goes from the file header straight to
+#: ``PARTICIPANT PANEL RECORD``.  Whether the caveat should be on the page is a
+#: design question about the panel record rather than a rendering bug, so it is
+#: written down here instead of quietly assumed either way.
 PANEL_FIELDS: tuple[tuple[str, str], ...] = (
     ("panel_gender", "Gender"),
     ("panel_age", "Age"),

@@ -240,6 +240,85 @@ def distribution_table(human1: pd.DataFrame, synthetic: pd.DataFrame) -> pd.Data
     return pd.DataFrame(rows)
 
 
+def letter_contribution(frame: pd.DataFrame | None = None) -> pd.DataFrame:
+    """How much of ``political_advocacy`` rests on the one item we cannot code.
+
+    ``letter`` is one of that composite's four members and the only outcome in this
+    study whose value in the published file was produced by a classifier that no
+    longer exists: GPT-3.5 read each respondent's free-text letter, a human checked
+    the labels, and then the text was de-identified out of the file.  Our stand-in
+    rule is a keyword-and-length test, and its base rate cannot be made to match,
+    for a reason worth being precise about.
+
+    The human column is 0.4155 over all 31,324 rows.  It is *zero-filled*: only
+    23,575 respondents reached the letter screen at all, essentially every ``1`` is
+    among those, and so 7,712 of the 18,287 zeros — 42% of them across the whole file,
+    38% across the eleven kept arms — are attrition rather than a blank letter.  A sampled respondent cannot drop out, so there is
+    no rule over their text that reproduces 0.4155 without fabricating dropout.
+    Conditioning the comparison on reaching the page (0.545 over the kept arms)
+    trades that bias for a collider: the control arm has the *lowest* reach, 69%
+    against ~81% for the treatments, so its reachers are the most selected group in
+    the study and every intervention's conditional letter rate comes out negative.
+
+    What this table reports is the size of the resulting distortion, three ways.
+    ``r_ate`` is the correlation between the real arm-level effects on the four-item
+    composite and the effects on the same composite with ``letter`` held constant —
+    which is *identical* for every constant, and identical again to dropping the
+    item, because the three are affine transforms of one another.  Whatever it is
+    that ``letter`` contributes to the between-arm signal, no rule available to us
+    recovers any of it.  ``ate_inflation`` is what a constant does to the average
+    absolute effect; ``level_bias`` is what our own 0.85 does to the composite's
+    level.  All three belong on the table next to any ``political_advocacy`` result.
+    """
+    humans = load_humans() if frame is None else frame
+    parts = list(oc.COMPOSITES["political_advocacy"])
+    arms = humans.groupby("condition")
+
+    real = arms["political_advocacy"].mean()
+    ours = 0.85
+    held = humans.assign(letter=ours)
+    held["_pa"] = sum(
+        pd.to_numeric(held[part], errors="coerce") for part in parts
+    ) / len(parts)
+    constant = held.groupby("condition")["_pa"].mean()
+
+    real_ate = (real - real[CONTROL]).drop(CONTROL)
+    constant_ate = (constant - constant[CONTROL]).drop(CONTROL)
+    reached = humans["letter_timing"].notna()
+    return pd.DataFrame(
+        [
+            {
+                "human_letter_rate_all_rows": round(float(humans["letter"].mean()), 4),
+                "human_letter_rate_reached_page": round(
+                    float(humans.loc[reached, "letter"].mean()), 4
+                ),
+                "share_of_zeros_that_are_attrition": round(
+                    float(
+                        ((humans["letter"] == 0) & ~reached).sum()
+                        / max(1, (humans["letter"] == 0).sum())
+                    ),
+                    4,
+                ),
+                "our_letter_rate": ours,
+                "r_ate": round(float(real_ate.corr(constant_ate)), 4),
+                "rho_ate": round(
+                    float(real_ate.corr(constant_ate, method="spearman")), 4
+                ),
+                "mean_abs_ate_real": round(float(real_ate.abs().mean()), 4),
+                "mean_abs_ate_constant": round(float(constant_ate.abs().mean()), 4),
+                "ate_inflation": round(
+                    float(constant_ate.abs().mean() / real_ate.abs().mean()), 3
+                ),
+                "level_real": round(float(humans["political_advocacy"].mean()), 4),
+                "level_constant": round(float(held["_pa"].mean()), 4),
+                "level_bias": round(
+                    float(held["_pa"].mean() - humans["political_advocacy"].mean()), 4
+                ),
+            }
+        ]
+    )
+
+
 def control_levels(frame: pd.DataFrame | None = None) -> pd.DataFrame:
     """Control-arm level for every scored outcome: what a sample has to hit first.
 

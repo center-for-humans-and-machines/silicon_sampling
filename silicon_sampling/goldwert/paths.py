@@ -28,6 +28,12 @@ ARM_DOCX_DIR = MATERIALS / "intervention_docx"
 CODE_DIR = MATERIALS / "code"
 OSF_MANIFEST = MATERIALS / "osf_manifest.json"
 
+#: Stimulus pictures, fetched from the hosts the exports hot-link, so that the
+#: descriptions in :mod:`~silicon_sampling.goldwert.images` can be re-checked
+#: against the files they were written from without the network.
+STIMULI = MATERIALS / "stimuli"
+STIMULI_INDEX = STIMULI / "index.json"
+
 #: Whichever per-arm export also carries the full survey in its trash block.
 #: Both master exports contain the same battery; this one is the reference.
 MASTER_QSF = ARM_QSF_DIR / "Misperception_Correction_Risks.qsf"

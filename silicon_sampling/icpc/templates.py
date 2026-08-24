@@ -79,7 +79,7 @@ choice codes in `usa_3.qsf` (none of these questions defines `RecodeValues`,
 code), cross-checked against `codebook.xlsx` and against the published per-item
 means, and re-checked by `tests/test_icpc.py` on every run.
 
-**Display logic is real, not decorative.** Seventeen questions carry Qualtrics
+**Display logic is real, not decorative.** Sixteen questions carry Qualtrics
 `DisplayLogic`, and each renders inside a `<<?if ...>> ... <<?endif>>` branch: the
 eight WEPT number grids, the seven later WEPT decision pages (page *n* is only
 offered to a respondent who accepted page *n*-1), and the sharing-platform
@@ -105,9 +105,22 @@ times in the 8,253 real US respondents.
   page are shown and asked about, because a respondent who never saw them did not
   do the task, but the published data records which boxes were ticked rather than
   which numbers, and the outcome is the count of pages accepted.
-- **The debriefing form is not in the `.qsf` block list.** Its page timer is in the
-  data for 7,836 of the 8,253 US respondents, so it was shown; Qualtrics kept it
-  as an end-of-survey message. The wording is the hand transcription's.
+- **The debriefing form is the last element of the `.qsf`'s DEMOGRAPHICS block**,
+  not a block of its own, and it is rendered here from the hand transcription
+  rather than from the `.qsf`. Its page timer is in the data for 7,836 of the
+  8,253 US respondents.
+- **Every 0-100 slider states its range** on the prose line, as `Whole number from
+  0 to 100.` after the endpoint labels. The endpoint labels alone are what the
+  respondent saw, and they are also what left the models answering on a 0-10
+  scale; the range is stated on all 257 sliders and
+  `tests/test_icpc.py::test_every_slider_states_the_range_a_legal_answer_falls_in`
+  keeps it that way.
+- **The escape box is stated only where Qualtrics displayed one.** A Qualtrics
+  slider can carry an `NA` *label* without the box being switched on
+  (`Configuration.NotApplicable`), so the two are not the same question. The nine
+  policy items, the political-orientation pair and the three control-only trust
+  items had the box and say so; the sixteen `ID_*`, `Enviro_ID` and `Enviro_motiv`
+  items carry the label but not the box, and correctly say nothing.
 """
 
 

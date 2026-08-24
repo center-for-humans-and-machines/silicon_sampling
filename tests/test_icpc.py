@@ -18,7 +18,7 @@ than about whether anything runs:
   items.  So the binding is re-derived here from the ``.qsf``, cross-checked
   against ``codebook.xlsx``, and sanity-checked against the published per-item
   means, for every battery rather than for a spot check.
-* **Which screens a respondent is shown.**  Seventeen questions carry Qualtrics
+* **Which screens a respondent is shown.**  Sixteen questions carry Qualtrics
   ``DisplayLogic``, and a transcript that renders them unconditionally produces
   answer patterns that occur zero times in 8,253 real respondents — including in
   the effort outcome, which is a count of exactly those answers.  So what the
@@ -544,13 +544,331 @@ def test_the_per_item_check_covers_every_belief_and_policy_item():
 
 
 # --------------------------------------------------------------------------- #
+# what a response position tells a model about the answer it wants
+# --------------------------------------------------------------------------- #
+
+
+def _int_slots(elements):
+    """Every :class:`IntSlot` in an assembled arm, conditionals included."""
+    from silicon_sampling.survey.slots import IntSlot
+
+    for element in elements:
+        inner = getattr(element, "elements", None)
+        if inner is not None:
+            yield from _int_slots(inner)
+        elif isinstance(element, IntSlot):
+            yield element
+
+
+@requires_qsf
+def test_every_slider_states_the_range_a_legal_answer_falls_in():
+    """The regression test for the defect that cost this study its first run.
+
+    The project's slider convention printed the endpoint labels the respondent saw
+    and nothing else, which is faithful to the screen and useless to a model: the
+    screen also showed a 0-100 track.  Asked for a number with no range given, the
+    models answered on a small scale -- 80% to 94% of every 0-100 answer came back
+    as an integer of ten or less against 8% to 31% for real participants -- and
+    mean control-arm level error ran 20 to 47 points.  Nothing in the templates
+    looked wrong, because a missing sentence looks like a shorter sentence.  So the
+    range is asserted on every response position that wants an integer, not on a
+    sample of them, and both bounds are checked against the slot's own.
+    """
+    total = 0
+    for arm in inst.ARMS:
+        for slot in _int_slots(inst.assemble(arm).elements):
+            total += 1
+            assert f"from {slot.lo} to {slot.hi}." in (slot.anchors or ""), (
+                arm.key,
+                slot.id,
+                slot.anchors,
+            )
+    # 257 sliders across the twelve arms, plus the two text boxes Qualtrics
+    # validated as numbers (see the number-box test below).
+    assert total == 259, total
+
+
+@requires_qsf
+def test_a_number_box_asks_for_a_number_and_says_which_numbers():
+    """A Qualtrics text box carries its type in ``Validation``, not in its type.
+
+    ``negEmo_cliThreshTime`` and ``1.5 Threshold`` are ``TE``/``SL``, the same
+    question type as a comment box, and only
+    ``Validation.Settings.ContentType == "ValidNumber"`` says the screen refused
+    anything but a number.  Rendered as free text they let a synthetic respondent
+    answer "about four years, I think" into a column whose 726 and 692 human
+    answers are numeric without a single exception.  So every validated number box
+    in a ``.qsf``-rendered block is asserted to be an integer position, and to
+    state its range -- the same sentence the sliders now carry.
+    """
+    from silicon_sampling.survey.slots import IntSlot
+
+    state = inst.loaded()
+    found = 0
+    for arm in inst.ARMS:
+        if arm.block is None:
+            continue
+        block = state.by_description[arm.block]
+        for entry in state.block_elements[block.bid]:
+            question = state.survey.questions.get(entry.get("QuestionID"))
+            if question is None or question.kind != "TE":
+                continue
+            payload = state.payloads.get(question.qid, {})
+            if convert.numeric_bounds(question, payload) is None:
+                continue
+            found += 1
+            produced, _ = convert.convert_question(question, payload, {})
+            assert len(produced) == 1, question.export_tag
+            slot = produced[0]
+            assert isinstance(slot, IntSlot), (question.export_tag, type(slot))
+            assert f"from {slot.lo} to {slot.hi}." in slot.anchors, question.export_tag
+    assert found == 2, found
+
+
+@requires_qsf
+@requires_data
+def test_no_human_answered_a_validated_number_box_with_prose():
+    """The premise of the test above, taken from the data rather than assumed."""
+    import pandas as pd
+
+    columns = ["country", "negEmo_cliThreshTime", "X1.5.Threshold"]
+    frame = pd.read_csv(
+        paths.DOELL_CSV,
+        encoding="latin-1",
+        usecols=lambda name: name in columns,
+        low_memory=False,
+    )
+    united_states = frame[frame["country"].astype(str).str.lower() == "usa"]
+    for column in ("negEmo_cliThreshTime", "X1.5.Threshold"):
+        answered = united_states[column].dropna()
+        assert len(answered) > 500, (column, len(answered))
+        assert pd.to_numeric(answered, errors="coerce").notna().all(), column
+
+
+@requires_qsf
+def test_a_not_applicable_box_is_stated_exactly_where_qualtrics_showed_one():
+    """An ``NA`` *label* is not an ``NA`` *box*, and only the box was on screen.
+
+    Qualtrics keeps the escape option's wording in ``Labels["NA"]`` whether or not
+    the option is switched on; switching it on is ``Configuration.NotApplicable``.
+    Sixteen control-arm sliders here carry the label with the box off, so a
+    transcript that read the label would offer every one of them an escape the
+    respondent never had -- and a transcript that ignored the flag entirely would
+    drop the escape from the nine policy items, which is a scored outcome.  The
+    hand transcription tracks the flag; this is what holds it there.
+    """
+    from silicon_sampling.vlasceanu import content_shared as shared
+    from silicon_sampling.vlasceanu import elements as V
+    from silicon_sampling.vlasceanu.country import UNITED_STATES
+
+    state = inst.loaded()
+    shown: dict[str, str | None] = {}
+    for question in state.survey.questions.values():
+        if question.kind != "Slider":
+            continue
+        payload = state.payloads.get(question.qid, {})
+        labels = payload.get("Labels") or {}
+        configuration = payload.get("Configuration") or {}
+        escape = None
+        if isinstance(labels, dict) and configuration.get("NotApplicable"):
+            escape = (labels.get("NA") or {}).get("Display")
+        rows = list(zip(question.choices, question.codes or question.choices))
+        for _, code in rows:
+            shown[convert.data_column(question, code)] = escape
+
+    blocks = [
+        shared.BELIEF,
+        shared.POLICY,
+        shared.CONTROL_EXTRA_IVS,
+        shared.terms_probing_block(0),
+        shared.demographics_block(UNITED_STATES),
+    ]
+    checked = 0
+    for block in blocks:
+        for screen in block.screens:
+            for element in screen.elements:
+                if isinstance(element, V.Slider):
+                    items = [element.slot]
+                elif isinstance(element, V.Matrix):
+                    items = [slot for slot, _ in element.items]
+                else:
+                    continue
+                for slot in items:
+                    if slot not in shown:
+                        continue
+                    checked += 1
+                    assert (element.extra or None) == shown[slot], (
+                        slot,
+                        element.extra,
+                        shown[slot],
+                    )
+    assert checked == 37, checked
+
+
+def _flat(text: str) -> str:
+    """Normalised for comparison: one authority uses curly quotes, one straight."""
+    for pair in (
+        "\u2019'",
+        "\u2018'",
+        '\u201c"',
+        '\u201d"',
+        "\u2013-",
+        "\u2014-",
+        "\xa0 ",
+    ):
+        text = text.replace(pair[0], pair[1])
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+@requires_qsf
+def test_every_line_of_every_stimulus_reaches_the_transcript():
+    """No screen, paragraph or option of a manipulation is silently dropped.
+
+    Every other check here is about a response *position* -- does it exist, does it
+    gate, does it name the right column.  None of them would notice a stimulus
+    screen going missing, because a screen with no question on it has no slot and
+    contributes nothing countable; and eleven of the twelve arms are nothing but
+    such screens.  So the ``.qsf``'s own text is walked chunk by chunk and looked
+    for in the rendered template, which is the one assertion that fails if a page
+    break, an ``<img>`` or a paragraph stops being emitted.
+
+    The two Qualtrics pipes are excluded on purpose: they are the only text that is
+    *supposed* to differ, having become an echo of this respondent's own answer.
+    """
+    state = inst.loaded()
+    for arm in inst.ARMS:
+        if arm.block is None:
+            continue
+        rendered = _flat(
+            render_template(inst.header("p", arm), inst.assemble(arm).elements)
+        )
+        block = state.by_description[arm.block]
+        for entry in state.block_elements[block.bid]:
+            question = state.survey.questions.get(entry.get("QuestionID"))
+            if question is None or question.kind in {"Timing", "Meta"}:
+                continue
+            visible = convert.strip_html(convert.with_images(question.raw_text))
+            chunks = [c for c in visible.split("\n") if len(c.strip()) > 25]
+            for chunk in chunks + [c for c in question.choices if c]:
+                if "${" in chunk:
+                    continue
+                assert _flat(chunk) in rendered, (arm.key, question.export_tag, chunk)
+
+
+#: ``.qsf`` block -> the hand-transcribed blocks that stand in for it, for the
+#: wording check below.  ``DEMOGRAPHICS`` maps to two of them because the
+#: debriefing form is the tail of that block rather than a block of its own, and
+#: ``WEPTdemo`` to one because the eight ``WEPTpage`` blocks are checked with it.
+SHARED_AGAINST_QSF: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (("CONSENT FORM",), ("consent",)),
+    (("Climate Change Information Overview for all",), ("intro",)),
+    (("Belief in AnthrCC",), ("belief",)),
+    (("Policy Support",), ("policy",)),
+    (("Social media sharing Piped Text",), ("sharing",)),
+    (
+        ("WEPTdemo", *(f"WEPTpage{page}" for page in range(1, 9))),
+        ("wept",),
+    ),
+    (("1. Control Condition IVs",), ("control_ivs",)),
+    (("AttentionCheck_60", "DEMOGRAPHICS"), ("demographics", "debrief")),
+)
+
+
+@requires_qsf
+def test_the_shared_screens_are_worded_the_way_the_qsf_words_them():
+    """The transcription is a *transcription*, and the ``.qsf`` is what it copies.
+
+    The shared screens were read visually off a PDF whose text layer is corrupt,
+    and every other check here is blind to a wrong word: the slot ids are right,
+    the columns are right, the batteries bind correctly, the sessions drive.  A
+    transcription that says "a greenhouse gases" where the survey said "a
+    greenhouse gas" passes all of it.  So every sentence the ``.qsf`` holds is
+    looked for in the assembled screens, which is the only assertion that fails
+    when a hand edit drifts.
+
+    Two kinds of text are excluded because they are *meant* to differ: the
+    ``[IMAGE: ...]`` lines, whose words are ours and not the survey's, and the one
+    sentence carrying a Qualtrics pipe, which becomes this respondent's own
+    condition code.
+    """
+    state = inst.loaded()
+    assembled: dict[str, str] = {}
+    for arm in inst.ARMS:
+        for block in inst.assemble(arm).elements:
+            key = getattr(block, "key", None)
+            if key is None or key in assembled:
+                continue
+            assembled[key] = _flat(render_template("", [block]))
+
+    for descriptions, keys in SHARED_AGAINST_QSF:
+        rendered = " ".join(assembled[key] for key in keys)
+        for description in descriptions:
+            block = state.by_description[description]
+            for entry in state.block_elements[block.bid]:
+                question = state.survey.questions.get(entry.get("QuestionID"))
+                if question is None or question.kind in {"Timing", "Meta"}:
+                    continue
+                visible = convert.strip_html(question.raw_text)
+                for chunk in visible.split("\n"):
+                    if len(chunk.strip()) <= 25 or "${" in chunk:
+                        continue
+                    flat = _flat(chunk.lstrip("\u2022 "))
+                    assert flat in rendered, (
+                        description,
+                        question.export_tag,
+                        chunk[:120],
+                    )
+
+
+# --------------------------------------------------------------------------- #
+# the effortful task
+# --------------------------------------------------------------------------- #
+
+
+@requires_qsf
+def test_the_wept_grids_are_the_numbers_the_qsf_holds():
+    """The sixty numbers on each effort page, checked against their own source.
+
+    A Qualtrics Profile matrix stores its rows as empty ``Choices`` and its cells
+    as nested ``Answers``, so ``question.choices`` on a WEPT grid is six empty
+    strings and the grid looks absent from the ``.qsf``.  It is not, which means the
+    one part of this instrument that was believed to be unverifiable by hand is
+    verifiable -- and a grid transcribed from a PDF is exactly the kind of thing
+    that acquires a wrong digit silently, because nothing downstream reads it.
+
+    Rows are compared as a *set*: every grid sets ``Randomization`` to ``All``, so
+    the row order a respondent saw was their own and no fixed order can be right.
+    """
+    from silicon_sampling.vlasceanu import content_shared as shared
+
+    state = inst.loaded()
+
+    def grid(tag: str) -> set[tuple[int, ...]]:
+        question = next(
+            q for q in state.survey.questions.values() if q.export_tag == tag
+        )
+        answers = state.payloads[question.qid]["Answers"]
+        rows = set()
+        for row in sorted(answers, key=int):
+            cells = answers[row]
+            rows.add(tuple(int(cells[c]["Display"]) for c in sorted(cells, key=int)))
+        return rows
+
+    assert set(shared._WEPT_DEMO_ROWS) == grid("WEPTdemo1") | grid("WEPTdemo2")
+    for page in range(1, 9):
+        transcribed = set(shared._WEPT_PAGE_ROWS[page])
+        assert len(transcribed) == 6, page
+        assert transcribed == grid(f"WEPT{page}nums"), page
+
+
+# --------------------------------------------------------------------------- #
 # display logic
 # --------------------------------------------------------------------------- #
 
 
 @requires_qsf
 def test_the_transcript_gates_exactly_what_qualtrics_gated():
-    """The regression test for seventeen ungated conditional questions.
+    """The regression test for sixteen ungated conditional questions.
 
     The display logic used to live only in an English sentence on the screen, and
     the one consumer that tried to read it back out matched seven of the fifteen

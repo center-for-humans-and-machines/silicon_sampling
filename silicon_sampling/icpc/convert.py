@@ -7,15 +7,21 @@ The **``.qsf``** carries every intervention verbatim — question text, slider
 bounds, endpoint labels, choice sets, the survey's own page breaks and its piped
 text.  Nothing about the eleven stimuli needs to be transcribed by hand, which
 matters: transcription is where a manipulation quietly acquires a word the
-respondent never read.  What the ``.qsf`` does *not* carry is what the pictures
-showed (:mod:`~silicon_sampling.icpc.images` supplies that) and, oddly, the WEPT
-number grids: the six rows of ten two-digit numbers on each effort page are
-generated client-side and the file holds an empty matrix where they should be.
+respondent never read.  The one thing the ``.qsf`` does *not* carry is what the
+pictures showed; :mod:`~silicon_sampling.icpc.images` supplies that.
 
 The **hand transcription in** :mod:`silicon_sampling.vlasceanu.content_shared`
-carries exactly those grids, plus the page boundaries recovered from the
-``*_Page.Submit`` timers and the described images, for every screen that is
-shared across arms.  It also uses the *published data* column names as slot ids
+carries the page boundaries recovered from the ``*_Page.Submit`` timers and the
+described images, for every screen that is shared across arms.  It also carries
+the WEPT number grids, which look hand-made and are not: a Profile matrix stores
+its rows as empty ``Choices`` and the sixty numbers as nested ``Answers``, so a
+reader who checks ``choices`` sees a blank grid and concludes the numbers were
+generated client-side.  They are in the file, and
+``tests/test_icpc.py::test_the_wept_grids_are_the_numbers_the_qsf_holds`` holds
+the transcription to them — as *sets* of rows, because Qualtrics randomises the
+row order per respondent.
+
+The transcription also uses the *published data* column names as slot ids
 (``Belief.in.CC_1``), which is what makes a sampled answer comparable without a
 translation table.
 
@@ -64,6 +70,29 @@ DISPLAY_ONLY = {"DB", "Timing", "Meta", "HotSpot"}
 #: ``"What is your gender? - Selected Choice"`` names no item; it says the column
 #: holds the radio button rather than its free-text companion.
 QUALTRICS_LABEL_ANNOTATIONS = frozenset({"Selected Choice", "Text"})
+
+#: Text boxes the survey validated as numbers, and the range a legal answer falls
+#: in here.
+#:
+#: A Qualtrics text box carries its type in ``Validation``, not in its question
+#: type: both of these are ``TE``/``SL``, indistinguishable from a comment box
+#: until you read ``ContentType == "ValidNumber"``.  Rendered as free text they
+#: admit an answer of a *kind* no participant could give — the two columns hold
+#: 726 and 692 human answers and not one of them is non-numeric, because
+#: Qualtrics refused to advance the page — and a sampled essay would then sit in
+#: a column every downstream read treats as a number.
+#:
+#: The bound is ours and the tradeoff is real: Qualtrics set no ``Min`` or ``Max``,
+#: so the screen accepted any number, and a handful of participants answered in
+#: the billions.  A range has to be stated all the same, because a slider or a
+#: number box with no range stated is the exact defect that cost this study its
+#: first run.  1000 years is chosen to cover every answer that is an answer —
+#: the medians are 30 and 10 — at the cost of the joke replies, which are noise
+#: in a covariate nothing is scored against.
+QSF_NUMBER_RANGE: dict[str, tuple[int, int]] = {
+    "negEmo_cliThreshTime": (0, 1000),
+    "1.5 Threshold": (0, 1000),
+}
 
 _IMG_RE = re.compile(r"<img\b[^>]*>", re.I)
 _SRC_RE = re.compile(r'src="([^"]+)"', re.I)
@@ -243,6 +272,14 @@ def is_gated(column: str, stems=None) -> bool:
     return False
 
 
+def numeric_bounds(question: Question, payload: dict) -> tuple[int, int] | None:
+    """The range this text box accepted, or ``None`` if it accepted prose."""
+    settings = (payload.get("Validation") or {}).get("Settings") or {}
+    if settings.get("ContentType") != "ValidNumber":
+        return None
+    return QSF_NUMBER_RANGE.get(question.export_tag or question.qid, (0, 1000))
+
+
 def with_images(raw_html: str) -> str:
     """Replace every ``<img>`` with a described ``[IMAGE: ...]`` line.
 
@@ -333,6 +370,18 @@ def convert_question(
     if question.kind == "MC":
         return _choice_slot(question, text)
     if question.kind == "TE":
+        bounds = numeric_bounds(question, payload)
+        if bounds is not None:
+            low, high = bounds
+            number = IntSlot(
+                id=slot_id(question),
+                prompt=text,
+                anchors=state_range("", low, high),
+                lo=low,
+                hi=high,
+                max_tokens=6,
+            )
+            return [number], {number.id: data_column(question)}
         slot = FreeTextSlot(
             id=slot_id(question),
             prompt=text,
@@ -384,8 +433,10 @@ def convert_qsf_block(description: str, path=QSF) -> Converted:
 # the hand-transcription side
 # --------------------------------------------------------------------------- #
 
-#: Free numeric entries and the range a legal answer falls in.  Only ``Age``
-#: exists in this instrument, and 18-100 is the range the cleaning script kept.
+#: Free numeric entries on the *transcription* side, and the range a legal answer
+#: falls in.  Only ``Age`` reaches here, and 18-100 is the range the cleaning
+#: script kept; the ``.qsf`` side has its own map, :data:`QSF_NUMBER_RANGE`,
+#: because there the numeric type has to be read out of ``Validation`` first.
 NUMBER_RANGE = {"Age": (18, 100)}
 
 

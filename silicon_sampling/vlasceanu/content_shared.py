@@ -527,7 +527,7 @@ WEPT = Block(
                 Text(
                     "Did you know that planting trees is one of the best ways to fight "
                     "climate change? As trees grow, they remove carbon dioxide (a "
-                    "greenhouse gases) from the air. They store the carbon in the trees "
+                    "greenhouse gas) from the air. They store the carbon in the trees "
                     "and soil, and then release oxygen into the air."
                 ),
                 Text(

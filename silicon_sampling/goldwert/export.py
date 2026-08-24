@@ -25,18 +25,45 @@ what makes a sampled row and a real row interchangeable.
 
 **The letter is coded, and the coding is not the study's.**  ``letter`` in the
 published file is a 0/1 judgement, made by GPT-3.5 and checked by hand, of whether
-the free-text letter expressed clear thoughts about climate change; the text
-itself was de-identified out of the file, so the classifier cannot be re-run or
-even inspected.  :func:`letter_code` applies a stated keyword-and-length rule
-instead.  Its *base rate* will not match: the human column sits at 41% because the
-item was optional and most respondents skipped it, and a sampled respondent has no
-way to skip — the slot has no refusal option — so ours runs far higher.  The
-alternative was to leave the column missing, which makes ``political_advocacy``
-``NaN`` for every respondent and deletes one of the four preregistered composites
-from the comparison outright.  A member item that is near-constant attenuates that
-composite's effect by about a quarter; a missing one removes it.  The summary dict
-reports ``letter_rate`` so the size of the departure is visible rather than
-inferred.
+the free-text letter expressed clear thoughts about climate change; the text itself
+was de-identified out of the file, so the classifier cannot be re-run or even
+inspected.  :func:`letter_code` applies a stated keyword-and-length rule instead.
+Its base rate does not match and cannot be made to, and the reason is not that our
+rule is crude.
+
+The human column is 0.4155 over all 31,324 rows, and it is *zero-filled*: only
+23,575 respondents reached the letter screen, essentially every ``1`` is among
+those, and 42% of the zeros are therefore people who never saw the question.  A
+sampled respondent cannot drop out, so no rule over their text reproduces 0.4155
+without fabricating attrition.  Nor is the optionality reproducible: the item is
+Qualtrics ``RequestResponse``, which nags once and lets you click past, and the
+*screen* never says the answer is optional — only the zip-code box below it does.
+The permission to skip was a property of the survey software, not of the words on
+the page, so putting "you may leave this blank" into the transcript would be adding
+text no respondent read, and a slot that ends at ``"Response: "`` has nothing to
+click past.  And "wrote nothing usable" cannot be detected either: the keyword rule
+returns 1 for any on-topic sentence, which is what a model asked to write a letter
+about climate change produces, so ours runs about 0.85.
+
+What *is* available is honesty about the consequence, which
+:func:`~silicon_sampling.goldwert.score.letter_contribution` measures on the human
+data.  Holding ``letter`` at a constant — at 0.85, at 0.41, at anything — is an
+affine transform of dropping it, so all three give the same answer: the arm-level
+effects on ``political_advocacy`` correlate 0.82 (Spearman 0.72) with the real ones,
+i.e. a third of the between-arm variance in that composite is carried by ``letter``
+alone and nothing recovers it.  Worse than the attenuation is the direction: the
+arms that gain most on the other three items gain *least* on ``letter``
+(``LetterFuture`` is the study's strongest political-advocacy arm and its lowest
+letter arm), so holding it constant inflates the mean absolute ATE by 69%, from
+0.019 to 0.032.  Our 0.85 adds a level bias of +0.073 on a 0-1 scale, 0.520 to
+0.593.
+
+So the column is still filled — leaving it missing makes ``political_advocacy``
+``NaN`` for every respondent and deletes a preregistered composite outright — and
+``outcomes.compute`` now also reports ``political_advocacy_no_letter`` over the
+three codeable members, so a reader can see the composite with and without the item
+that is doing the damage.  The summary dict reports ``letter_rate`` so the size of
+the departure is visible rather than inferred.
 
 Two smaller fidelity notes, stated here because ``samples.csv`` is where someone
 will meet them.  The ``"Not Applicable"`` escapes on ``pol_candidate``, ``flyless``

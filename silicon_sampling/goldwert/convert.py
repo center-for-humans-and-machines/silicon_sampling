@@ -19,14 +19,18 @@ publishing.  :data:`PUBLISHED_COLUMN` is that rename table, transcribed from
 ``Advocacy_Cleaning_main.ipynb``, and it is applied at slot-construction time so
 that a sampled answer needs no translation to sit beside a real one.
 
-**Media becomes a bracketed note, not silence.**  Eleven of the eighteen arms
-survive the modality audit, and several of those still display a photograph or a
-chart beside prose that already states everything the picture states.  Deleting
-the ``<img>`` silently would leave a transcript claiming the respondent read a
-page that, as displayed, had something else on it.  A single bracketed line
-saying an image was there — carrying its caption or alt text when Qualtrics
-supplies one, and nothing when it does not — records the gap instead of hiding
-it, and never invents a description of a picture nobody here has seen.
+**Media becomes a bracketed description, not a bracketed silence.**  Eleven of the
+eighteen arms survive the modality audit and nine of those eleven display something
+that is not text.  The first version of this converter emitted a content-free note
+— "[ image shown here — not reproduced ]" — on the honest ground that nothing in
+the pipeline had looked at a picture.  That was the right note for the wrong
+situation: two whole screens of ``ThreatInjustEfficacy`` have no content but
+photographs, so they rendered as nothing but brackets, and ``BindingMorals`` asks
+how impure the Great Smoky Mountains look "in the picture on the right above" of a
+screen that had no picture on it.  So the pictures were fetched from the hosts the
+exports hot-link and looked at, and :mod:`~silicon_sampling.goldwert.images` holds
+what each one shows.  Six files are gone from every host that ever served them, and
+those say exactly that instead of being invented.
 
 The same line has to distinguish three things an ``<iframe>`` can be in this
 survey, because four of the nine outcome pages are built on one: the petition is
@@ -45,6 +49,7 @@ from ..survey.elements import Conditional, PageBreak, Text
 from ..survey.slots import ChoiceSlot, FreeTextSlot, IntSlot, Slot
 from ..voelkel.convert import anchors_from_labels, resolve_pipes, slider_bounds
 from ..voelkel.qsf import Question, Survey, strip_html
+from . import images
 
 #: Qualtrics question types that record nothing a respondent typed.
 DISPLAY_ONLY = {"DB", "Timing", "Meta", "HotSpot", "GRB"}
@@ -127,44 +132,105 @@ def export_column(question: Question, row_key: str = "") -> str:
 
 
 def media_notes(question: Question, payload: dict) -> list[Text]:
-    """Bracketed placeholders for whatever was on the page besides words.
+    """A bracketed line for whatever was on the page besides words.
 
-    Deliberately content-free.  The note says what kind of thing was displayed and
-    repeats a caption, an alt text or a host only when Qualtrics stored one; it
-    never describes a picture, because nothing in this pipeline has looked at one.
+    The line carries the picture's *content* whenever
+    :mod:`~silicon_sampling.goldwert.images` has a description written from the file
+    — which is every picture the eleven kept arms display.  It used to be
+    deliberately content-free, on the ground that nothing in the pipeline had looked
+    at a picture; that was true and it was also the reason two whole screens of
+    ``ThreatInjustEfficacy`` rendered as nothing but brackets and
+    ``BindingMorals`` asked how impure the mountains looked "in the picture on the
+    right above" with no picture anywhere.  So the pictures were fetched and looked
+    at, and what is left content-free is only what could not be recovered, which
+    says so in as many words.
+
+    A live third-party panel keeps its old treatment, because there is nothing to
+    describe: the petition, the two newsletter forms and the bank lookup are pages
+    the respondent acted *inside*.
     """
     notes: list[Text] = []
     for found in _MEDIA_TAG.finditer(question.raw_text):
-        notes.append(Text(f"[ {_describe_media(found.group(0))} ]", style="cite"))
-    if payload.get("Graphics"):
-        described = str(payload.get("GraphicsDescription") or "").strip()
-        detail = f": {described}" if described else ""
+        # A <video> keeps its address in a nested <source>, which the tag match
+        # stops short of, so the note is resolved against a window of the raw text
+        # rather than against the opening tag alone.
+        window = question.raw_text[found.start() : found.start() + 800]
         notes.append(
-            Text(f"[ image shown here{detail} — not reproduced ]", style="cite")
+            Text(f"[ {_describe_media(found.group(0), window)} ]", style="cite")
         )
+    graphic = str(payload.get("Graphics") or "")
+    if graphic:
+        described = images.describe(graphic)
+        if described is None:
+            described = str(payload.get("GraphicsDescription") or "").strip()
+            detail = f": {described}" if described else ""
+            notes.append(
+                Text(f"[ image shown here{detail} — not described ]", style="cite")
+            )
+        else:
+            notes.append(Text(f"[ image shown here: {described} ]", style="cite"))
     return notes
 
 
-def _describe_media(tag: str) -> str:
-    """What one media tag was, said without inventing its content."""
+def describe_media_html(html: str) -> str:
+    """Bracketed note(s) for a snippet of HTML that is nothing but media.
+
+    Exists for the fields ``MispCorrectionRisks`` pipes onto a page at runtime: the
+    survey stores the chart for each of its six topics as an ``<img>`` tag in an
+    embedded value, so the thing that has to be described is a string rather than a
+    question.  Same vocabulary as :func:`media_notes`, deliberately.
+    """
+    found = [
+        f"[ {_describe_media(match.group(0), html[match.start():match.start() + 800])} ]"
+        for match in _MEDIA_TAG.finditer(html)
+    ]
+    return "\n".join(found)
+
+
+def _asset_key(tag: str, href: str) -> str:
+    """The string this table is keyed by: a Qualtrics asset id, else the whole URL.
+
+    Qualtrics serves the same picture from nine different brand hosts across the
+    eighteen exports, so keying on the URL alone would need the host to be right as
+    well as the asset; keying on ``IM=``/``F=``/the YouTube id is keying on the thing
+    itself.  Everything hot-linked from outside Qualtrics has no such id, and there
+    the URL *is* the identity.
+    """
+    for pattern in (r"[?&]IM=([A-Za-z0-9_]+)", r"[?&]F=([A-Za-z0-9_]+)"):
+        found = re.search(pattern, href)
+        if found:
+            return found.group(1)
+    found = _YOUTUBE.search(href)
+    if found:
+        return found.group(1)
+    return href
+
+
+def _describe_media(tag: str, window: str = "") -> str:
+    """What one media tag showed, from the file, or a loud note that it is gone."""
     name = re.match(r"<(\w+)", tag).group(1).lower()
-    src = _SRC.search(tag)
+    src = _SRC.search(tag) or (_SRC.search(window) if window else None)
     href = src.group(1) if src else ""
-    if name == "audio":
-        return "audio clip played here — not reproduced"
-    if name == "video" or (name == "iframe" and _VIDEO_HOST.search(href)):
-        found = _YOUTUBE.search(href)
-        where = f" (YouTube {found.group(1)})" if found else ""
-        return f"video shown here{where} — not reproduced"
-    if name == "iframe":
+    if name == "iframe" and not _VIDEO_HOST.search(href):
         host = re.sub(r"^https?://(www\.)?", "", href).split("/")[0]
         where = f" from {host}" if host else ""
         return (
             f"live web panel embedded here{where}, which the participant acted inside"
         )
+    key = _asset_key(tag, href)
+    if name in {"video", "audio"} or name == "iframe":
+        described = images.MEDIA_ALT.get(key)
+        kind = "audio clip played here" if name == "audio" else "video shown here"
+        if described:
+            return f"{kind}: {' '.join(described.split())}"
+        where = f" ({key})" if key and key != href else ""
+        return f"{kind}{where} — not reproduced"
+    described = images.describe(key)
+    if described is not None:
+        return f"image shown here: {described}"
     alt = _ALT.search(tag)
     detail = f": {strip_html(alt.group(1))}" if alt else ""
-    return f"image shown here{detail} — not reproduced"
+    return f"image shown here{detail} — not described"
 
 
 def resolve_embedded(question: Question, embedded: dict) -> Question:

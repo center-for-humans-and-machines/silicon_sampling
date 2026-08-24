@@ -319,12 +319,18 @@ def main(argv: list[str] | None = None) -> int:
         print()
         print("Display-position sensitivity of each outcome")
         print(score.position_effects(humans).to_string(index=False))
+        print()
+        print("What `letter` does to political_advocacy (the one uncodeable item)")
+        print(score.letter_contribution(humans).to_string(index=False))
         if args.out:
             out = Path(args.out)
             out.mkdir(parents=True, exist_ok=True)
             board.to_csv(out / "leaderboard.csv", index=False)
             reference.to_csv(out / "reference_effects.csv", index=False)
             score.control_levels(humans).to_csv(out / "control_levels.csv", index=False)
+            score.letter_contribution(humans).to_csv(
+                out / "letter_contribution.csv", index=False
+            )
             print(f"\nwrote {out}")
         return 0
 

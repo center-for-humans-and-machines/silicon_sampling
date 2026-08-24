@@ -511,7 +511,14 @@ def test_every_echo_names_a_slot_that_exists():
         )
         ids = {entry["id"] for entry in slot_manifest(elements)}
         for echoed in set(echo.findall(render_template("", elements))):
-            assert echoed in ids or echoed in run.PIPED_STAND_INS, (name, echoed)
+            assert echoed in ids or run.is_piped_field(echoed), (name, echoed)
+            if echoed.endswith(instrument.FEEDBACK_SUFFIX):
+                # A per-screen feedback field has to name a correction item that
+                # exists, or the screen reacts to an answer nobody gave.
+                assert echoed in {
+                    instrument.feedback_field(slot)
+                    for slot in instrument.correction_feedback()
+                }, (name, echoed)
 
 
 def test_the_percentage_boxes_are_numbers_and_not_prose():
@@ -752,6 +759,207 @@ def test_transcripts_tokenise_incrementally():
             prompts.append(step[0])
             session.submit(step[1], run.widest_answer(step[1]))
         verify(tokenizer, prompts)
+
+
+# --------------------------------------------------------------------------- #
+# what the respondent was shown that was not words
+# --------------------------------------------------------------------------- #
+
+
+def test_every_picture_a_kept_arm_shows_is_described():
+    """A described picture is the point of `images.py`; a count of them is not.
+
+    The audit used to dispose of every image with "captioned", "redundant" or
+    "decorative" and no file had been opened. This asserts the opposite property:
+    for the arms a transcript actually carries, every distinct asset resolves to
+    words -- either a description written from the file, or an explicit statement
+    that the file has been deleted.
+    """
+    for row in instrument.modality_audit():
+        if row["usable"] != "yes":
+            continue
+        assert row["undescribed"] == 0, (row["condName"], row["n_assets"])
+        assert 0 <= row["media_loss"] <= 3, row["condName"]
+
+
+def test_no_kept_arm_renders_a_bare_media_placeholder():
+    """The failure this whole exercise is about, stated as a property of the text."""
+    for name in instrument.CONDITIONS:
+        text = render_template(
+            "",
+            instrument.elements_for(
+                name, battery=list(instrument.DV_BLOCK_ORDER), rng=random.Random(0)
+            ),
+        )
+        for bad in ("— not described ]", "— not reproduced ]", "page element shown"):
+            assert bad not in text, (name, bad)
+
+
+def test_the_control_screen_says_what_the_video_was():
+    """A control arm rendered as a blank screen mis-specifies every contrast.
+
+    Real control participants spent five minutes on a knot-tying video before the
+    outcome battery. The arm is kept because that video's *content* is null, not
+    because the screen was empty, so the screen has to say what it was.
+    """
+    text = render_template(
+        "",
+        instrument.elements_for(
+            "Control", battery=list(instrument.DV_BLOCK_ORDER), rng=random.Random(0)
+        ),
+    )
+    assert "knot" in text.lower()
+    assert "five-minute" in text
+    # And the instruction the screen carried, which was already there.
+    assert "Please carefully watch the following video" in text
+
+
+def test_the_video_share_outcome_names_the_video_it_asks_about():
+    """`video` is a quarter of `public_awareness`, and it asks about a clip."""
+    text = render_template(
+        "",
+        instrument.elements_for(
+            "HopeAngerNarratives",
+            battery=list(instrument.DV_BLOCK_ORDER),
+            rng=random.Random(0),
+        ),
+    )
+    assert "Emissions" in text and "UN Environment Programme" in text
+
+
+# --------------------------------------------------------------------------- #
+# the randomiser, the counter and the feedback screens
+# --------------------------------------------------------------------------- #
+
+
+def test_the_randomiser_permutes_only_the_blocks_the_flow_gives_it():
+    """Counting the randomised blocks put the writing prompt inside the randomiser.
+
+    `MispCorrectionRisks` has nine live blocks and a randomiser over blocks two to
+    seven. Shuffling "the last six" shuffled the four remaining corrections
+    together with the writing prompt and the closing debrief, so the page
+    summarising all six corrections could be shown after two of them.
+    """
+    arm = instrument.BY_NAME["MispCorrectionRisks"]
+    groups = instrument.live_block_groups(paths.arm_qsf(arm.qsf))
+    randomised = [group for group in groups if group.randomised]
+    assert len(randomised) == 1
+    assert len(randomised[0].ids) == 6 == randomised[0].subset
+    state = instrument.arm_survey(arm.qsf)
+    names = [state.survey.blocks[bid].description for bid in randomised[0].ids]
+    assert all("Writing" not in name and "EPA" not in name for name in names), names
+
+    # And over many draws the fixed blocks never move.
+    for seed in range(40):
+        order = instrument.arm_block_order(arm, random.Random(seed))
+        shown = [state.survey.blocks[bid].description for bid in order]
+        assert shown[0].endswith("Intro"), shown
+        assert shown[-2:] == ["2. Writing Prompt", "2. Final EPA Question"], shown
+
+
+def test_the_randomised_order_matches_the_published_display_order_column():
+    """`FL_34_DO` records each real respondent's own draw; ours must be of a piece."""
+    frame = _responses()
+    drawn = frame["FL_34_DO"].dropna()
+    assert len(drawn) > 1_000
+    real = {frozenset(value.split("|")) for value in drawn}
+    assert len(real) == 1, "the column permutes one fixed set of blocks"
+    assert len(next(iter(real))) == 6
+    arm = instrument.BY_NAME["MispCorrectionRisks"]
+    group = next(
+        g for g in instrument.live_block_groups(paths.arm_qsf(arm.qsf)) if g.randomised
+    )
+    state = instrument.arm_survey(arm.qsf)
+    # `FL_34_DO` writes block names with the spaces squeezed out.
+    ours = {state.survey.blocks[bid].description.replace(" ", "") for bid in group.ids}
+    assert ours == next(iter(real)), (ours, next(iter(real)))
+
+
+def test_the_correction_counter_advances_with_the_drawn_order():
+    """Six screens headed "Question 1 out of 6" is a screen nobody was shown."""
+    text = render_template(
+        "",
+        instrument.elements_for(
+            "MispCorrectionRisks",
+            battery=list(instrument.DV_BLOCK_ORDER),
+            rng=random.Random(3),
+        ),
+    )
+    for position in range(1, 7):
+        assert text.count(f"Question {position} out of 6") == 1, position
+
+
+def test_the_feedback_screen_reacts_to_the_answer_that_was_given():
+    """The page script's rule, reproduced: recode 1 is right, recode 0 is wrong."""
+    feedback = instrument.correction_feedback()
+    # Six items, and the employment one is the odd one out: "Decreasing" is the
+    # correct answer there and "Increasing" everywhere else.
+    assert len(feedback) == 6
+    employment = feedback["misperception_correction_risks__employment"]
+    assert employment["Decreasing"] == "That's correct!"
+    assert employment["Increasing"] == "That's incorrect!"
+    energy = feedback["misperception_correction_risks__energy_prices"]
+    assert energy["Increasing"] == "That's correct!"
+
+    answers: dict = {}
+    run.derive_piped_fields(answers)
+    slot = "misperception_correction_risks__property"
+    answers[slot] = "No"
+    run.derive_piped_fields(answers)
+    assert answers[instrument.feedback_field(slot)] == "That's incorrect!"
+    answers[slot] = "Yes"
+    run.derive_piped_fields(answers)
+    assert answers[instrument.feedback_field(slot)] == "That's correct!"
+
+
+def test_a_later_answer_cannot_rewrite_an_earlier_feedback_screen():
+    """The bug a single shared `text` field caused, as a property of the prefix.
+
+    A session re-renders the whole transcript on every step, so one field shared by
+    six screens means answering the fourth correction rewrites the first screen
+    thousands of tokens back. Held here directly rather than only through the
+    incremental-tokenisation check that first caught it.
+    """
+    profile = next(
+        p
+        for p in profiles.build(seed=7, per_arm=1)
+        if p.condition == "MispCorrectionRisks"
+    )
+    session = run.session_for(profile)
+    seen: list[str] = []
+    while (step := session.next_prompt()) is not None:
+        prompt, slot = step
+        # Every prompt must extend the previous one, never revise it.
+        if seen:
+            assert prompt.startswith(
+                seen[-1][: len(seen[-1]) - len("Response: ")]
+            ), "an earlier screen changed under a later answer"
+        seen.append(prompt)
+        session.submit(slot, validate.answer(slot, random.Random(len(seen))))
+    assert len(seen) > 30
+
+
+def test_the_writing_page_shows_the_correction_the_respondent_chose():
+    """The page asks them to write about an issue; it has to name and show it."""
+    source, pages = instrument.summary_choice_pages()
+    assert len(pages) == 6
+    answers = {source: "increasing prices of energy"}
+    run.derive_piped_fields(answers)
+    assert "electricity to become more expensive" in answers["choice_text"]
+    assert "price board" in answers["img"]
+    assert answers["option_text"] == "increasing prices of energy"
+    # And nothing left over from the stand-in.
+    assert run.ABSENT not in answers["choice_text"]
+    assert run.ABSENT not in answers["img"]
+
+
+def test_the_demographic_section_keeps_its_own_screens():
+    """Two display screens and every page break of this block had been dropped."""
+    text = render_template("", instrument.battery_elements("Demographics"))
+    assert "The following section includes some questions about your background" in text
+    assert "We are also interested in learning about you/your family" in text
+    # Five screens of questions, not one.
+    assert text.count("- - - [ page") >= 6, text.count("- - - [ page")
 
 
 def main() -> int:

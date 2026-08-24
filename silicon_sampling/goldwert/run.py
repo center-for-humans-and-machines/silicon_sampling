@@ -14,19 +14,21 @@ Two things about this study needed a decision here rather than in the instrument
 
 **One arm's page text was written by JavaScript, and a session cannot render
 without standing in for it.**  ``MispCorrectionRisks`` pipes five embedded fields
-onto its pages — the correct/incorrect feedback (``text``, ``col``), the chart the
-respondent's own answer selects (``img``), and two echoes of the option they
-picked (``choice_text``, ``option_text``).  All five are declared in the survey
-flow as ``Recipient`` with no value, which means the live page script set them:
-the export does not contain the strings, and nothing here has seen them.  The
-template file leaves them as ``<<=...>>`` markers, which is honest for a template
-and fatal for a session, because a marker reaching the model is exactly what
-:mod:`~silicon_sampling.survey.render` exists to prevent.  So
-:func:`derive_piped_fields` fills them: the one that *is* recoverable —
-``option_text``, the respondent's own choice — is echoed from the answer they just
-gave, and the four that are not become the same bracketed note the converter uses
-for absent media.  Inventing feedback prose would be worse than recording that
-some was there.
+onto its pages — the correct/incorrect feedback (``text``, ``col``), the photograph
+the respondent's own answer selects (``img``), and two echoes of the option they
+picked (``choice_text``, ``option_text``).  All five are declared in the survey flow
+as ``Recipient`` with no value, so the first version of this module concluded that
+the export does not contain them and filled four of the five with a bracketed
+"something was here" note.  That was wrong about the export.  The *values* are all
+there — ``correct`` and ``incorrect`` are literals in the flow, the six correction
+paragraphs and the six photographs are literals in the flow — and the *rules* are
+all in the questions' own ``QuestionJS``: recode 1 pastes ``correct``, and the
+summary question's handler pastes ``<topic>_text`` and ``<topic>_img`` for the topic
+the respondent picked.  So :func:`derive_piped_fields` now reproduces the script
+rather than apologising for it, and only ``col`` stays empty, because it is a hex
+colour in a ``style`` attribute.  The cost of getting this wrong was concentrated:
+the writing screen asks the respondent to write about the issue whose correction
+paragraph and photograph it is showing them, and it was showing them a placeholder.
 
 **The arm's own block order is drawn from the profile's seed, not from a fresh
 RNG.**  Two arms (``MispCorrectionRisks``, ``HopeAngerNarratives``) have their
@@ -59,19 +61,17 @@ ABSENT = (
 )
 
 #: Piped fields ``MispCorrectionRisks`` sets at runtime, and the stand-in each
-#: gets.  ``option_text`` is overwritten from the respondent's own answer as soon
-#: as they have given one; the rest never become knowable.
+#: gets before the answer it depends on has been given.  Four of the five are
+#: overwritten from the respondent's own answers by :func:`derive_piped_fields`; the
+#: exception is ``col``, which is a hex colour in a ``style`` attribute and has
+#: nothing in it for a transcript to carry.
 PIPED_STAND_INS = {
     "text": ABSENT,
-    "col": ABSENT,
+    "col": "",
     "img": ABSENT,
     "choice_text": ABSENT,
     "option_text": ABSENT,
 }
-
-#: The slot whose answer ``option_text`` echoes: the issue the respondent named as
-#: most disruptive, quoted back at them on the writing page.
-OPTION_TEXT_SOURCE = "misperception_correction_risks__Q34"
 
 #: Margin on the measured worst-case transcript.  Real prose tokenises denser than
 #: the repeated placeholder the free-text slots are filled with below, so the
@@ -80,18 +80,42 @@ OPTION_TEXT_SOURCE = "misperception_correction_risks__Q34"
 LENGTH_MARGIN = 1.05
 
 
-def derive_piped_fields(answers: dict) -> None:
-    """Fill the runtime-piped fields, so no marker can reach the model.
+def is_piped_field(key: str) -> bool:
+    """Whether this answer key is page furniture rather than something a respondent
+    produced."""
+    return key in PIPED_STAND_INS or key.endswith(inst.FEEDBACK_SUFFIX)
 
-    Called by the session after every submitted answer, which is what lets
-    ``option_text`` track the choice it echoes instead of freezing at the
-    stand-in.
+
+def derive_piped_fields(answers: dict) -> None:
+    """Stand in for the arm's page script, so no marker and no blank reaches a model.
+
+    Called by the session after every submitted answer, which is what lets these
+    track the answers they are functions of instead of freezing at a stand-in.
+
+    Each correction screen's "That's correct!" / "That's incorrect!" line gets its
+    own field rather than sharing the survey's single ``text``, because a session
+    re-renders the whole transcript on every step and a shared field would let a
+    later answer rewrite an earlier screen; see
+    :data:`~silicon_sampling.goldwert.instrument.FEEDBACK_SUFFIX`.  Written here in
+    the same pass as the rest so that there is one place where a page the export does
+    not hold gets filled in.
     """
     for field, stand_in in PIPED_STAND_INS.items():
         answers.setdefault(field, stand_in)
-    chosen = answers.get(OPTION_TEXT_SOURCE)
+
+    for slot_id, table in inst.correction_feedback().items():
+        given = answers.get(slot_id)
+        answers[inst.feedback_field(slot_id)] = (
+            table.get(str(given), ABSENT) if given is not None else ABSENT
+        )
+
+    source, pages = inst.summary_choice_pages()
+    chosen = answers.get(source)
     if chosen:
         answers["option_text"] = chosen
+        prose, note = pages.get(str(chosen), ("", ""))
+        answers["choice_text"] = prose or ABSENT
+        answers["img"] = note or ABSENT
 
 
 def session_for(profile: Profile) -> Session:
@@ -112,13 +136,13 @@ def record_for(profile: Profile, session: Session) -> dict:
     """One line of ``answers.jsonl``: the profile it came from, and its answers.
 
     The piped fields are dropped: they are page furniture the respondent read, not
-    anything they produced, and leaving them in would put five columns of
+    anything they produced, and leaving them in would put eleven columns of
     boilerplate into the analysis frame.
     """
     answers = {
         key: value
         for key, value in session.answers.items()
-        if not key.startswith("_") and key not in PIPED_STAND_INS
+        if not key.startswith("_") and not is_piped_field(key)
     }
     return {
         "profile_id": profile.profile_id,

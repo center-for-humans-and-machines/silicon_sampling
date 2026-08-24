@@ -281,6 +281,20 @@ COMPOSITES: dict[str, tuple[str, ...]] = {
     "lifestyle_changes": ("flylessN", "lessbeefN"),
 }
 
+#: ``political_advocacy`` minus ``letter``: the same composite over the three of its
+#: four items that a silicon sample can actually produce.
+#:
+#: Reported alongside the preregistered one, never instead of it.  ``letter`` is a
+#: GPT-3.5 judgement of free text that was de-identified out of the published file,
+#: so the classifier can be neither re-run nor inspected, and 42% of its zeros are
+#: respondents who never reached the page rather than respondents who wrote nothing
+#: — a kind of zero a sampled respondent structurally cannot have.  Any rule that
+#: fills the column with a near-constant is affinely equivalent to dropping it, so
+#: reporting the drop explicitly is the honest version of what the rule does; see
+#: :func:`~silicon_sampling.goldwert.score.letter_contribution` for how much of the
+#: between-arm signal goes with it.
+LETTER_FREE: tuple[str, ...] = ("petition", "pol_campaignN", "pol_candidateN")
+
 #: Column -> divisor that puts it on 0-1, exactly as the notebook does it.
 NORMALIZED = {
     "marchN": ("march", 100.0),
@@ -397,6 +411,9 @@ def compute(frame: pd.DataFrame) -> pd.DataFrame:
         data[name] = _num(data, source) / divisor
     for name, parts in COMPOSITES.items():
         data[name] = sum(_num(data, part) for part in parts) / len(parts)
+    data["political_advocacy_no_letter"] = sum(
+        _num(data, part) for part in LETTER_FREE
+    ) / len(LETTER_FREE)
     data["pos_emo"] = sum(_num(data, e) / 100 for e in POSITIVE_EMOTIONS) / len(
         POSITIVE_EMOTIONS
     )
