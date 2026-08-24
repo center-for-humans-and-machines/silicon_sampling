@@ -29,6 +29,16 @@ MODELS = {
     "qwen25_7b_v2": "Qwen/Qwen2.5-7B",
     "qwen25_72b_v2": "Qwen/Qwen2.5-72B",
     "v4_flash_v2": "deepseek-ai/DeepSeek-V4-Flash-Base",
+    # Third render, after the full fidelity audit: the block randomiser permuting
+    # the wrong blocks, piped correction text and photographs rendered as
+    # placeholders, media-only screens rendered as bare brackets, a scored video
+    # nobody was shown, a blank control arm where participants watched a
+    # five-minute video, opt-outs printed but refused, and a letter box whose
+    # prompt told the model to enter a ZIP code.  `_v2` was the slider-range fix
+    # alone and is superseded.
+    "qwen25_7b_v3": "Qwen/Qwen2.5-7B",
+    "qwen25_72b_v3": "Qwen/Qwen2.5-72B",
+    "v4_flash_v3": "deepseek-ai/DeepSeek-V4-Flash-Base",
 }
 
 #: Human-readable names for report tables and plot legends.
@@ -41,6 +51,9 @@ LABELS = {
     "qwen25_7b_v2": "Qwen2.5-7B (scale stated)",
     "qwen25_72b_v2": "Qwen2.5-72B (scale stated)",
     "v4_flash_v2": "DeepSeek-V4-Flash (scale stated)",
+    "qwen25_7b_v3": "Qwen2.5-7B (audited)",
+    "qwen25_72b_v3": "Qwen2.5-72B (audited)",
+    "v4_flash_v3": "DeepSeek-V4-Flash (audited)",
 }
 
 #: The run every existing path and report already refers to.
@@ -68,6 +81,7 @@ DEFAULT_RUN = "qwen25_7b"
 ENGINE_DEFAULTS = {
     "v4_flash": {"kv_cache_dtype": "fp8_ds_mla"},
     "v4_flash_v2": {"kv_cache_dtype": "fp8_ds_mla"},
+    "v4_flash_v3": {"kv_cache_dtype": "fp8_ds_mla"},
 }
 
 
