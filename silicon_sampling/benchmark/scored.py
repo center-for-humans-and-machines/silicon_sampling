@@ -75,7 +75,6 @@ from typing import Callable, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
-from scipy import stats
 
 from ..analysis.ols import aliased_columns, benjamini_hochberg, design_matrix
 from ..analysis.ols import interaction, level_order, ols
@@ -347,6 +346,8 @@ def binary_marginal_effects(
     p-values too — leaving the column out here made every binary row's ``p_bh``
     ``NaN`` once the tables were concatenated.
     """
+    from scipy import stats
+
     column = design.condition_col
     scale = design.scale(outcome) if scale is None else scale
     data = frame[[column, outcome]].dropna()

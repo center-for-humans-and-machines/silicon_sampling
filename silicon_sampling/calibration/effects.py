@@ -214,9 +214,26 @@ def true_effect_sd(effects: pd.DataFrame, column: str = "estimate") -> pd.Series
 
 
 def optimal_shrinkage(
-    predicted: np.ndarray | pd.Series, reference: np.ndarray | pd.Series
+    predicted: np.ndarray | pd.Series,
+    reference: np.ndarray | pd.Series,
+    allow_negative: bool = False,
 ) -> float:
     """The factor minimising RMSE against a reference: ``sum(hl) / sum(ll)``.
+
+    **A negative factor is refused by default, and that is a substantive choice
+    rather than defensive coding.** Least squares will happily return one whenever
+    the predictions are anti-correlated with the reference, and the result is not a
+    shrinkage — it inverts every predicted effect, turning "this message raises
+    trust" into "it lowers it". That is a different claim about the world, and it
+    needs far more evidence than a shrinkage does.
+
+    This is not hypothetical here. DeepSeek-V4-Flash's effects are anti-correlated
+    with human effects on every leave-one-study-out training split of Voelkel, ICPC
+    and Goldwert (train r -0.19, -0.12, -0.40), so its fitted factor comes out at
+    -0.35, -0.22 and -0.37. Applied, that would have flipped the sign of all 208
+    Pfänder predictions on the strength of two studies. Clamping to zero instead
+    says the honest thing: on this evidence the model has no usable ranking signal,
+    so predict no differences rather than the opposite ones.
 
     A regression through the origin, because RMSE is measured against zero rather
     than against a fitted intercept.  This is the factor to use when RMSE is the
@@ -236,11 +253,14 @@ def optimal_shrinkage(
     denominator = float(np.sum(lo[keep] ** 2))
     if denominator <= 0:
         return float("nan")
-    return float(np.sum(hi[keep] * lo[keep]) / denominator)
+    factor = float(np.sum(hi[keep] * lo[keep]) / denominator)
+    return factor if allow_negative else max(factor, 0.0)
 
 
 def slope_matching_factor(
-    predicted: np.ndarray | pd.Series, reference: np.ndarray | pd.Series
+    predicted: np.ndarray | pd.Series,
+    reference: np.ndarray | pd.Series,
+    allow_negative: bool = False,
 ) -> float:
     """The factor that drives the benchmark's calibration ``beta`` to exactly 1.
 
@@ -256,7 +276,8 @@ def slope_matching_factor(
     variance = float(np.var(lo[keep], ddof=1))
     if variance <= 0:
         return float("nan")
-    return float(np.cov(lo[keep], hi[keep], ddof=1)[0, 1] / variance)
+    factor = float(np.cov(lo[keep], hi[keep], ddof=1)[0, 1] / variance)
+    return factor if allow_negative else max(factor, 0.0)
 
 
 def variance_match(predicted: np.ndarray | pd.Series, target_sd: float) -> float:

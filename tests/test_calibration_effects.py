@@ -223,3 +223,31 @@ def test_profile_agreement_is_one_against_itself():
     agreement = E.profile_agreement(profile, profile)
     assert agreement["r"] == pytest.approx(1.0)
     assert agreement["n"] == table["outcome"].nunique()
+
+
+def test_a_negative_fitted_factor_is_refused_by_default():
+    """Least squares inverts anti-correlated predictions; that is not shrinkage.
+
+    DeepSeek-V4-Flash's effects are anti-correlated with human effects on every
+    leave-one-study-out training split available, so its fitted factor comes out
+    at -0.35, -0.22 and -0.37. Applying that would flip the sign of all 208
+    Pfänder predictions -- a different claim about the world, on the strength of
+    two studies. Zero says the honest thing instead: no usable ranking signal, so
+    predict no differences rather than the opposite ones.
+    """
+    table = effect_table(20)
+    anti = -1.0 * table["estimate"] + np.random.default_rng(3).normal(
+        0, 0.5, len(table)
+    )
+    assert E.optimal_shrinkage(table["estimate"], anti) == 0.0
+    assert E.slope_matching_factor(table["estimate"], anti) == 0.0
+    # the raw value is still reachable when a caller explicitly wants it
+    assert E.optimal_shrinkage(table["estimate"], anti, allow_negative=True) < 0
+
+
+def test_a_positive_fitted_factor_is_untouched_by_the_guard():
+    table = effect_table(21)
+    aligned = 0.3 * table["estimate"]
+    assert E.optimal_shrinkage(table["estimate"], aligned) == pytest.approx(
+        0.3, rel=1e-6
+    )

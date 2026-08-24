@@ -41,7 +41,6 @@ from typing import Sequence
 
 import numpy as np
 import pandas as pd
-from scipy import stats
 
 from .ols import design_matrix, interaction, ols, wald
 
@@ -54,6 +53,8 @@ def baseline_means(
     condition_col: str = "condition",
 ) -> pd.DataFrame:
     """Cell means per moderator level, within one condition."""
+    from scipy import stats
+
     subset = frame[frame[condition_col] == condition]
     rows = []
     for outcome in outcomes:

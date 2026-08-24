@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from scipy import stats
 
 
 def summary(frame: pd.DataFrame, columns) -> pd.DataFrame:
     """Mean, spread and shape per column."""
+    from scipy import stats
+
     rows = []
     for column in columns:
         values = (
@@ -143,6 +144,8 @@ def position_effects(frame: pd.DataFrame, batteries: dict) -> pd.DataFrame:
     questions.  A real battery should show no systematic slope once the items
     themselves are accounted for.
     """
+    from scipy import stats
+
     rows = []
     for name, items in batteries.items():
         present = [item for item in items if item in frame.columns]

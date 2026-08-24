@@ -44,7 +44,6 @@ from typing import Mapping, Sequence
 
 import numpy as np
 import pandas as pd
-from scipy import stats
 
 
 @dataclass
@@ -70,9 +69,13 @@ class Fit:
 
     @property
     def p(self) -> np.ndarray:
+        from scipy import stats
+
         return 2 * stats.t.sf(np.abs(self.t), df=max(self.n - self.k, 1))
 
     def ci(self, level: float = 0.95) -> tuple[np.ndarray, np.ndarray]:
+        from scipy import stats
+
         crit = stats.t.ppf(0.5 + level / 2, df=max(self.n - self.k, 1))
         return self.beta - crit * self.se, self.beta + crit * self.se
 
@@ -269,6 +272,8 @@ def interaction(
 
 def wald(fit: Fit, terms: Sequence[str]) -> dict:
     """Joint test that every coefficient in ``terms`` is zero."""
+    from scipy import stats
+
     idx = [fit.index(name) for name in terms if name in fit.names]
     if not idx:
         return {"chi2": 0.0, "df": 0, "p": 1.0}
