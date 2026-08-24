@@ -8,7 +8,8 @@ and [`scripts/select_calibration.py`](../../../scripts/select_calibration.py).
 
 Sub-reports: [1 · the metric map](01_metric_map.md) ·
 [2 · what the models are each good at](02_model_components.md) ·
-[3 · methodological traps](03_traps.md)
+[3 · methodological traps](03_traps.md) ·
+[4 · what ensembling means per respondent](04_ensembling.md)
 
 ## The one-paragraph version
 
