@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..models import DEFAULT_RUN
+from .. import paths as _paths
 
 ROOT = Path(__file__).resolve().parents[2]
-DATA = ROOT / "data" / "Voelkel"
+DATA = _paths.resolve("Voelkel")
 DOCS = ROOT / "docs"
 
 QSF = DATA / "Materials" / "SDC - Questionnaire - Qualtrics.qsf"
@@ -21,7 +22,7 @@ TEMPLATES = DATA / "text_templates"
 MODALITY_AUDIT = TEMPLATES / "modality_audit.csv"
 
 #: Root of every model's silicon-sampling output.
-RUNS = DATA / "silicon_sampling"
+RUNS = _paths.output("Voelkel", "silicon_sampling")
 
 
 def samples_dir(run: str = DEFAULT_RUN) -> Path:

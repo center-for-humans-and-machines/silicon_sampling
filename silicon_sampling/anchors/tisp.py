@@ -38,14 +38,16 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from .. import paths as _paths
+
 import pandas as pd
 
 from . import crosswalk as cw
 from .scales import NOT_MEASURED, Weighted, composite, weighted_moments
 
 ROOT = Path(__file__).resolve().parents[2]
-CSV = ROOT / "data" / "calibration" / "datasets" / "cologna_etal2025.csv"
-CODEBOOK = ROOT / "data" / "calibration" / "codebooks" / "cologna_etal2025_qs.docx"
+CSV = _paths.resolve("calibration", "datasets") / "cologna_etal2025.csv"
+CODEBOOK = _paths.resolve("calibration", "codebooks") / "cologna_etal2025_qs.docx"
 
 SOURCE = "TISP"
 COUNTRY = "USA"

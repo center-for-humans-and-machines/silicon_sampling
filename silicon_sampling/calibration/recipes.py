@@ -44,13 +44,15 @@ from pathlib import Path
 import pandas as pd
 
 from ..pfander import outcomes as pfander_outcomes
+from ..pfander import paths as _pfander_paths
 from . import components as C
 from . import effects as E
 from . import offsets as OFF
 from . import tier1
 
-#: Where a model's Pfänder run is filed.
-RUNS = Path("data/pfander/silicon_sampling")
+#: Where a model's Pfänder run is filed.  Taken from the study package rather
+#: than hardcoded, so a configured data root reaches here too.
+RUNS = _pfander_paths.RUNS
 
 #: Outcomes whose observed between-message spread is entirely sampling noise, so
 #: their apparent message ranking is variance with no covariance behind it.  This

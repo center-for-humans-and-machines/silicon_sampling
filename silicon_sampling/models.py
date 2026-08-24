@@ -20,6 +20,15 @@ MODELS = {
     # since it cannot import a worse model's ordering.
     "qwen25_7b_seed2": "Qwen/Qwen2.5-7B",
     "qwen25_72b_seed2": "Qwen/Qwen2.5-72B",
+    # Second template render for ICPC and Goldwert.  Their 0-100 sliders printed
+    # the endpoint labels the respondent saw and never the numeric range, so the
+    # models answered on a small scale: 80-94% of every slider answer came back at
+    # 10 or below against 8-31% for real participants, and control-arm level error
+    # ran 20-47 points.  The `_v2` runs are the same instruments with the range
+    # stated; the originals are kept because they are the evidence for the defect.
+    "qwen25_7b_v2": "Qwen/Qwen2.5-7B",
+    "qwen25_72b_v2": "Qwen/Qwen2.5-72B",
+    "v4_flash_v2": "deepseek-ai/DeepSeek-V4-Flash-Base",
 }
 
 #: Human-readable names for report tables and plot legends.
@@ -29,6 +38,9 @@ LABELS = {
     "v4_flash": "DeepSeek-V4-Flash",
     "qwen25_7b_seed2": "Qwen2.5-7B (replicate)",
     "qwen25_72b_seed2": "Qwen2.5-72B (replicate)",
+    "qwen25_7b_v2": "Qwen2.5-7B (scale stated)",
+    "qwen25_72b_v2": "Qwen2.5-72B (scale stated)",
+    "v4_flash_v2": "DeepSeek-V4-Flash (scale stated)",
 }
 
 #: The run every existing path and report already refers to.
@@ -55,6 +67,7 @@ DEFAULT_RUN = "qwen25_7b"
 #: throughput is actually made of here.
 ENGINE_DEFAULTS = {
     "v4_flash": {"kv_cache_dtype": "fp8_ds_mla"},
+    "v4_flash_v2": {"kv_cache_dtype": "fp8_ds_mla"},
 }
 
 

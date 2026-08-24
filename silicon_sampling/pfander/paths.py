@@ -14,11 +14,12 @@ from pathlib import Path
 
 from ..models import DEFAULT_RUN
 from ..sampling.engine import cache_root
+from .. import paths as _paths
 
 #: Repository root (``.../silicon_sampling``), found by walking up from this file.
 ROOT = Path(__file__).resolve().parents[2]
 
-DATA = ROOT / "data" / "pfander"
+DATA = _paths.resolve("pfander")
 DOCS = ROOT / "docs"
 
 #: Snapshot of the shipped benchmark materials.
@@ -32,7 +33,7 @@ CODEBOOK_CSV = SUBMISSION_SNAPSHOT / "codebook.csv"
 TEMPLATES = DATA / "text_templates"
 
 #: Root of every model's silicon-sampling output.
-RUNS = DATA / "silicon_sampling"
+RUNS = _paths.output("pfander", "silicon_sampling")
 
 
 def samples_dir(run: str = DEFAULT_RUN) -> Path:

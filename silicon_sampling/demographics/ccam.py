@@ -50,6 +50,8 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+
+from .. import paths as _paths
 from typing import Iterable, Mapping, Sequence
 
 import pandas as pd
@@ -67,8 +69,8 @@ from .codebook import (
 #: Repository root (``.../silicon_sampling``), found by walking up from this file.
 ROOT = Path(__file__).resolve().parents[2]
 
-CCAM_SAV = ROOT / "data" / "calibration" / "datasets" / "ccam.sav"
-CCAM_CODEBOOK = ROOT / "data" / "calibration" / "codebooks" / "ccam_codebook.pdf"
+CCAM_SAV = _paths.resolve("calibration", "datasets") / "ccam.sav"
+CCAM_CODEBOOK = _paths.resolve("calibration", "codebooks") / "ccam_codebook.pdf"
 
 #: Waves the association structure is estimated from: Apr 2022 - Dec 2024.
 STRUCTURE_WAVES = (26, 27, 28, 29, 30, 31)

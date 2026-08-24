@@ -217,6 +217,29 @@ def display_condition(payload: dict, survey: Survey, prefix: str = "") -> str | 
     return f'{prefix}{export_column(source)} = "{answer}"'
 
 
+def state_range(anchors: str, lo: int, hi: int) -> str:
+    """Endpoint labels *and* the numeric range, because labels alone are not enough.
+
+    The project's slider convention prints the endpoint labels the respondent saw
+    and nothing else — "Not at all accurate … Extremely accurate" — which is
+    faithful to the screen and useless to a model, because the screen also showed
+    a 0-100 track and the transcript does not.  Asked for a number with no range
+    given, the models answered on a small scale: 80% to 94% of every 0-100 slider
+    answer in this study came back as an integer of 10 or less, against 8% to 31%
+    for real participants, and mean control-arm level error ran 20 to 47 points on
+    a 0-100 scale.
+
+    That is not a modelling failure, it is a missing sentence.  Voelkel and Pfänder
+    do not have the problem because their source questionnaires happen to state the
+    range in prose ("Below is a range from 0 to 100 …", "0 = Not important at all,
+    50 = Moderately important, 100 = Extremely important") — so the convention held
+    up by luck on the two studies built first and broke on the two built later.
+    Saying the range on every integer slider makes it hold on purpose.
+    """
+    stated = f"Whole number from {lo} to {hi}."
+    return f"{anchors}  {stated}" if anchors else stated
+
+
 #: Minus signs a respondent might type.  Qualtrics renders the scale with an
 #: ASCII hyphen, but a model writing prose reaches for the typographic ones.
 _MINUS = ("-", "\u2212", "\u2013", "\u2014")
@@ -279,7 +302,7 @@ def _slider_slots(question: Question, payload: dict, prompt: str) -> list[Slot]:
     rows = _rows(payload)
     slots: list[Slot] = []
     for key, label in rows:
-        described = anchors or f"Whole number from {lo} to {hi}."
+        described = state_range(anchors, lo, hi)
         if not_applicable:
             # The source text for two of these items has an unbalanced quote of
             # its own; quoting it again would compound the mess, so it is

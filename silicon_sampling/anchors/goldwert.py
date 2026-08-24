@@ -63,11 +63,12 @@ from pathlib import Path
 import pandas as pd
 
 from ..pfander.outcomes import SCALE_RANGE
+from .. import paths as _paths
 from . import crosswalk as cw
 from .scales import NOT_MEASURED, Weighted, composite, weighted_moments
 
 ROOT = Path(__file__).resolve().parents[2]
-CSV = ROOT / "data" / "calibration" / "datasets" / "goldwert_etal2026.csv"
+CSV = _paths.resolve("calibration", "datasets") / "goldwert_etal2026.csv"
 
 SOURCE = "Goldwert"
 #: The control arm's own label in the published file.
@@ -121,7 +122,9 @@ def measure(
     if not entries or any(entry.conversion == "none" for entry in entries):
         return NOT_MEASURED
     if any(entry.conversion != "native" for entry in entries):
-        raise ValueError("Goldwert items are all native; nothing here converts a Likert")
+        raise ValueError(
+            "Goldwert items are all native; nothing here converts a Likert"
+        )
     scales = {SCALE_RANGE[entry.pfander_outcome] for entry in entries}
     if len(scales) != 1:
         raise ValueError(f"mixed target scales in group: {sorted(scales)}")

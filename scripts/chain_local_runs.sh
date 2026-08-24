@@ -20,10 +20,11 @@
 # the group in flight plus one model load, and re-running this script continues
 # rather than restarting.
 #
-# Usage: scripts/chain_local_runs.sh [study ...]      (default: icpc goldwert)
+# Usage: RUN=<run_key> scripts/chain_local_runs.sh [study ...]   (default: icpc goldwert)
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+RUN="${RUN:-qwen25_7b}"
 
 #: Respondent target per study, matching the profile sets on disk.
 target_for () {
@@ -38,10 +39,10 @@ target_for () {
 
 out_for () {
     case "$1" in
-        icpc) echo "data/ICPC/silicon_sampling/qwen25_7b" ;;
-        goldwert) echo "data/Goldwert/silicon_sampling/qwen25_7b" ;;
-        pfander) echo "data/pfander/silicon_sampling/qwen25_7b" ;;
-        voelkel) echo "data/Voelkel/silicon_sampling/qwen25_7b" ;;
+        icpc) echo "data/ICPC/silicon_sampling/$RUN" ;;
+        goldwert) echo "data/Goldwert/silicon_sampling/$RUN" ;;
+        pfander) echo "data/pfander/silicon_sampling/$RUN" ;;
+        voelkel) echo "data/Voelkel/silicon_sampling/$RUN" ;;
     esac
 }
 
@@ -80,13 +81,13 @@ run_study () {
         [ -f "$out/answers.jsonl" ] && done_now=$(wc -l < "$out/answers.jsonl")
         if [ "$done_now" -ge "$target" ]; then
             echo "[chain] $study complete at $done_now/$target ($(date -Is))"
-            python3 -m "silicon_sampling.$study.cli" build-csv --run qwen25_7b \
+            python3 -m "silicon_sampling.$study.cli" build-csv --run "$RUN" \
                 >> "$out/sample.log" 2>&1
             return 0
         fi
         wait_for_gpu || return 1
         echo "[chain] $study attempt $attempt from $done_now/$target ($(date -Is))"
-        python3 -m "silicon_sampling.$study.cli" sample --run qwen25_7b \
+        python3 -m "silicon_sampling.$study.cli" sample --run "$RUN" \
             >> "$out/sample.log" 2>&1
         # A step that advanced nothing means a real failure, not a wall-clock kill,
         # so stop rather than retrying into the same error.

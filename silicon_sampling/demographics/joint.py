@@ -84,6 +84,8 @@ import itertools
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+
+from .. import paths as _paths
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -92,7 +94,7 @@ import pandas as pd
 from . import ccam
 from .codebook import PFANDER, Codebook
 
-TABLE_DIR = ccam.ROOT / "data" / "demographics"
+TABLE_DIR = _paths.resolve("demographics")
 
 
 def table_path(book: Codebook = PFANDER, directory: Path | None = None) -> Path:

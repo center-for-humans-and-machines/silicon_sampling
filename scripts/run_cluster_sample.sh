@@ -23,15 +23,24 @@ shift 3
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# Outputs go to the scratch partition, not into the checkout. The repo lives under
+# a home directory with a modest quota, and a raw transcript tree runs about 900 MB
+# per 18,000-respondent run -- filling it made every job submission fail at mkdir,
+# which is an opaque way to discover a disk problem. Reads still fall back to the
+# checkout, so the calibration datasets that ship with the project keep working.
+: "${SILICON_SAMPLING_DATA:=/opt/outputs/silicon_sampling/data}"
+export SILICON_SAMPLING_DATA
+echo "[wrapper] SILICON_SAMPLING_DATA=$SILICON_SAMPLING_DATA"
+
 # The directory case is the only per-study knowledge in this wrapper: the CLI
 # module path is "silicon_sampling.<study>.cli" for all four, and every one of them
 # accepts the same --run and writes answers.jsonl one line per finished respondent,
 # which is what the retry loop below counts.
 case "$STUDY" in
-    pfander)  OUT="$ROOT/data/pfander/silicon_sampling/$RUN" ;;
-    voelkel)  OUT="$ROOT/data/Voelkel/silicon_sampling/$RUN" ;;
-    icpc)     OUT="$ROOT/data/ICPC/silicon_sampling/$RUN" ;;
-    goldwert) OUT="$ROOT/data/Goldwert/silicon_sampling/$RUN" ;;
+    pfander)  OUT="$SILICON_SAMPLING_DATA/pfander/silicon_sampling/$RUN" ;;
+    voelkel)  OUT="$SILICON_SAMPLING_DATA/Voelkel/silicon_sampling/$RUN" ;;
+    icpc)     OUT="$SILICON_SAMPLING_DATA/ICPC/silicon_sampling/$RUN" ;;
+    goldwert) OUT="$SILICON_SAMPLING_DATA/Goldwert/silicon_sampling/$RUN" ;;
     *) echo "unknown study: $STUDY" >&2; exit 2 ;;
 esac
 LOG="$OUT/sample.log"

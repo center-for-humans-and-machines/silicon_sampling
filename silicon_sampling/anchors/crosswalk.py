@@ -733,9 +733,7 @@ _GOLDWERT = (
         pfander_scale=f"{_SLIDER}, endpoints Not likely at all / Extremely likely",
         source="Goldwert",
         source_item="conversation",
-        source_text=(
-            "Commitment to talking about climate change with close others"
-        ),
+        source_text=("Commitment to talking about climate change with close others"),
         source_scale="0-100 slider whose handle starts at 0",
         source_options=None,
         conversion="native",

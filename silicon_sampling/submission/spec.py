@@ -30,6 +30,8 @@ import os
 import re
 from pathlib import Path
 
+from .. import paths as _paths
+
 #: The 16 text interventions, in the benchmark's own order (``submission_spec.R``).
 INTERVENTIONS: tuple[str, ...] = (
     "Corporate reliance",
@@ -190,7 +192,7 @@ DISCLOSURE_CLASSES = ("A", "B", "C")
 #: environment names one, otherwise this project's snapshot of it.
 TEMPLATE_REPO_ENV = "SILICON_SAMPLING_SUBMISSION_REPO"
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_SNAPSHOT = _PROJECT_ROOT / "data" / "pfander" / "submission_template"
+_SNAPSHOT = _paths.resolve("pfander", "submission_template")
 
 
 def filename_pattern(team_id: str, tier: int = 1) -> re.Pattern[str]:

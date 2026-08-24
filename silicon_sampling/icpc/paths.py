@@ -16,9 +16,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..models import DEFAULT_RUN
+from .. import paths as _paths
 
 ROOT = Path(__file__).resolve().parents[2]
-DATA = ROOT / "data" / "ICPC"
+DATA = _paths.resolve("ICPC")
 DOCS = ROOT / "docs"
 
 MATERIALS = DATA / "Materials"
@@ -43,7 +44,7 @@ CODEBOOK = MATERIALS / "codebook.xlsx"
 #: (or recovered out of ``master_survey.pdf`` where the CDN had dropped it).
 STIMULI = MATERIALS / "stimuli"
 
-CALIBRATION = ROOT / "data" / "calibration"
+CALIBRATION = _paths.resolve("calibration")
 DOELL_CSV = CALIBRATION / "datasets" / "doell_etal2024.csv"
 VLASCEANU_XLSX = CALIBRATION / "datasets" / "vlasceanu_etal2024.xlsx"
 DOELL_PAPER = CALIBRATION / "papers" / "doell.pdf"
@@ -52,7 +53,7 @@ TEMPLATES = DATA / "text_templates"
 MODALITY_AUDIT = TEMPLATES / "modality_audit.csv"
 
 #: Root of every model's silicon-sampling output.
-RUNS = DATA / "silicon_sampling"
+RUNS = _paths.output("ICPC", "silicon_sampling")
 
 
 def samples_dir(run: str = DEFAULT_RUN) -> Path:

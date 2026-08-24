@@ -49,14 +49,16 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from .. import paths as _paths
+
 import pandas as pd
 
 from . import crosswalk as cw
 from .scales import NOT_MEASURED, Weighted, composite, weighted_moments
 
 ROOT = Path(__file__).resolve().parents[2]
-SAV = ROOT / "data" / "calibration" / "datasets" / "ccam.sav"
-CODEBOOK = ROOT / "data" / "calibration" / "codebooks" / "ccam_codebook.pdf"
+SAV = _paths.resolve("calibration", "datasets") / "ccam.sav"
+CODEBOOK = _paths.resolve("calibration", "codebooks") / "ccam_codebook.pdf"
 
 SOURCE = "CCAM"
 WEIGHT = "weight_wave"

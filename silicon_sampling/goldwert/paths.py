@@ -16,9 +16,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..models import DEFAULT_RUN
+from .. import paths as _paths
 
 ROOT = Path(__file__).resolve().parents[2]
-DATA = ROOT / "data" / "Goldwert"
+DATA = _paths.resolve("Goldwert")
 DOCS = ROOT / "docs"
 
 MATERIALS = DATA / "Materials"
@@ -33,7 +34,7 @@ MASTER_QSF = ARM_QSF_DIR / "Misperception_Correction_Risks.qsf"
 #: The other master export, kept for cross-checking the battery against.
 MASTER_QSF_ALT = ARM_QSF_DIR / "Linking_Individual_and_Structural_Change.qsf"
 
-CALIBRATION = ROOT / "data" / "calibration"
+CALIBRATION = _paths.resolve("calibration")
 RESPONSES_CSV = CALIBRATION / "datasets" / "goldwert_etal2026.csv"
 CODEBOOK_PDF = CALIBRATION / "codebooks" / "goldwert_etal2026_codebook.pdf"
 PAPER_PDF = CALIBRATION / "papers" / "goldwert_et_al.pdf"
@@ -44,7 +45,7 @@ MANIFEST = TEMPLATES / "manifest.json"
 FORMAT_DOC = TEMPLATES / "00_FORMAT.md"
 
 #: Root of every model's silicon-sampling output.
-RUNS = DATA / "silicon_sampling"
+RUNS = _paths.output("Goldwert", "silicon_sampling")
 
 
 def samples_dir(run: str = DEFAULT_RUN) -> Path:

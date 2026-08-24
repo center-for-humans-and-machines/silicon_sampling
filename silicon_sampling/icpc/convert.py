@@ -274,7 +274,7 @@ def _slider_slots(
     prints the header once and gives each row its statement.
     """
     low, high = slider_bounds(payload)
-    anchors = anchors_from_labels(payload) or f"Whole number from {low} to {high}."
+    anchors = state_range(anchors_from_labels(payload), low, high)
     rows = [
         (label, code)
         for label, code in zip(question.choices, question.codes or question.choices)
@@ -389,13 +389,45 @@ def convert_qsf_block(description: str, path=QSF) -> Converted:
 NUMBER_RANGE = {"Age": (18, 100)}
 
 
-def _anchor_line(left: str, right: str, mid: str | None, extra: str | None) -> str:
+def state_range(anchors: str, lo: int, hi: int) -> str:
+    """Endpoint labels *and* the numeric range, because labels alone are not enough.
+
+    The project's slider convention prints the endpoint labels the respondent saw
+    and nothing else — "Not at all accurate … Extremely accurate" — which is
+    faithful to the screen and useless to a model, because the screen also showed
+    a 0-100 track and the transcript does not.  Asked for a number with no range
+    given, the models answered on a small scale: 80% to 94% of every 0-100 slider
+    answer in this study came back as an integer of 10 or less, against 8% to 31%
+    for real participants, and mean control-arm level error ran 20 to 47 points on
+    a 0-100 scale.
+
+    That is not a modelling failure, it is a missing sentence.  Voelkel and Pfänder
+    do not have the problem because their source questionnaires happen to state the
+    range in prose ("Below is a range from 0 to 100 …", "0 = Not important at all,
+    50 = Moderately important, 100 = Extremely important") — so the convention held
+    up by luck on the two studies built first and broke on the two built later.
+    Saying the range on every integer slider makes it hold on purpose.
+    """
+    stated = f"Whole number from {lo} to {hi}."
+    return f"{anchors}  {stated}" if anchors else stated
+
+
+def _anchor_line(
+    left: str,
+    right: str,
+    mid: str | None,
+    extra: str | None,
+    lo: int | None = None,
+    hi: int | None = None,
+) -> str:
     """The scale's endpoints as the respondent saw them, plus any escape option."""
     parts = [part for part in (left, mid, right) if part]
-    line = " … ".join(parts) if parts else "Whole number from 0 to 100."
+    line = " … ".join(parts)
     if extra:
         line += f" (the screen also offered a '{extra}' box)"
-    return line
+    if lo is not None and hi is not None:
+        return state_range(line, lo, hi)
+    return line or "Whole number from 0 to 100."
 
 
 def convert_element(element) -> tuple[list, dict[str, str]]:
@@ -418,7 +450,12 @@ def convert_element(element) -> tuple[list, dict[str, str]]:
             id=element.slot,
             prompt=element.stem or "",
             anchors=_anchor_line(
-                element.left, element.right, element.mid, element.extra
+                element.left,
+                element.right,
+                element.mid,
+                element.extra,
+                element.lo,
+                element.hi,
             ),
             lo=element.lo,
             hi=element.hi,
@@ -426,7 +463,14 @@ def convert_element(element) -> tuple[list, dict[str, str]]:
         )
         return [slot], {slot.id: slot.id}
     if isinstance(element, V.Matrix):
-        anchors = _anchor_line(element.left, element.right, element.mid, element.extra)
+        anchors = _anchor_line(
+            element.left,
+            element.right,
+            element.mid,
+            element.extra,
+            element.lo,
+            element.hi,
+        )
         out: list = []
         columns: dict[str, str] = {}
         for slot_id, label in element.items:

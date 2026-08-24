@@ -151,7 +151,9 @@ def _slider_sd(sd: float, entry: cw.Entry) -> float:
     """
     if entry.conversion != "likert" or entry.source_options is None:
         return sd
-    return sheppard_sd(sd, entry.source_options, scale=SCALE_RANGE[entry.pfander_outcome])
+    return sheppard_sd(
+        sd, entry.source_options, scale=SCALE_RANGE[entry.pfander_outcome]
+    )
 
 
 @lru_cache(maxsize=8)
