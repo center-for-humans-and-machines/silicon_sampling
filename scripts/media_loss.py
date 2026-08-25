@@ -69,7 +69,9 @@ def arm_accuracy(study: str, score, paths, run: str) -> pd.DataFrame:
                 "n_outcomes": len(g),
                 "dir_pct": float((np.sign(h) == np.sign(ours)).mean() * 100),
                 "mae": float(np.abs(h - ours).mean()),
-                "r_arm": float(np.corrcoef(h, ours)[0, 1]) if np.std(ours) > 0 else np.nan,
+                "r_arm": (
+                    float(np.corrcoef(h, ours)[0, 1]) if np.std(ours) > 0 else np.nan
+                ),
             }
         )
     return pd.DataFrame(out)

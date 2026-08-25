@@ -344,7 +344,34 @@ HUMAN_EFFECT_SCALE = {
     "ICPC": 5.035,  # climate belief and policy, US subsample
 }
 
-#: The shrinkage factor applied to the averaged effect vector before submission.
+#: How far to shrink each arm's effect toward its own outcome's mean effect.
+#:
+#: Leave-one-study-out adopts this at 0.5 for Qwen2.5-7B (3/3 folds) and holds it
+#: in the same direction for the others.  On the averaged effect vector it is a
+#: clear out-of-fold gain: per-study mean pearson r 0.398 -> 0.426, pooled r
+#: 0.446 -> 0.470, and RMSE improves at the same time.
+#:
+#: The curve is broad rather than peaked -- per-study r is 0.428 / 0.429 / 0.426
+#: at 0.3 / 0.4 / 0.5 and pooled r peaks at 0.5 -- so the pre-committed default of
+#: 0.5 is kept instead of fitting a magnitude inside the flat region.
+WITHIN_SHRINK = 0.5
+
+#: The global multiplicative shrinkage applied *after* :data:`WITHIN_SHRINK`.
+#:
+#: **The two shrinkages interact, and the constant is only meaningful as a pair
+#: with the within factor.**  Fitted out-of-fold across the three studies, the
+#: best global factor falls almost linearly as the within factor rises:
+#:
+#: ===========  =====  =====  =====  =====  =====
+#: within        0.2    0.4    0.5    0.8    1.0
+#: global k      0.475  0.425  0.375  0.300  0.250
+#: nRMSE         0.987  0.997  1.015  1.052  1.076
+#: beta          0.992  0.976  1.018  0.994  1.026
+#: ===========  =====  =====  =====  =====  =====
+#:
+#: So 0.25 is right only with no within-shrinkage, and pairing it with 0.5 --
+#: which an earlier revision did -- overshoots to beta 1.53.  The shipped pair is
+#: (within 0.5, global 0.375).
 #:
 #: **Re-derived on the audited (`_v3`) samples; the earlier 0.2 was fitted partly
 #: on broken ones.**  The ICPC and Goldwert questionnaires printed slider endpoint
@@ -359,29 +386,24 @@ HUMAN_EFFECT_SCALE = {
 #: 0.25% because its mean signed human effect is -0.06 pp.  On ICPC and Goldwert
 #: the mean signed effect is +3.2 and +2.8 pp -- nearly every arm pushes the same
 #: way -- so the through-origin fit absorbs that mean into its slope and the two
-#: diverge two-fold (0.46 against 0.27 on ICPC, 0.60 against 0.28 on Goldwert).
+#: diverge two-fold.  The pairing above is chosen on nRMSE + |beta - 1| jointly,
+#: which is flat to within 4% across the whole grid.
 #:
-#: The choice between them is decided by how flat the RMSE curve is.  Out-of-fold
-#: over the three studies, mean RMSE runs 3.099 / 3.056 / 3.028 / 3.018 / 3.024 at
-#: k = 0.25 / 0.30 / 0.35 / 0.40 / 0.45 -- a 1.7% spread across the whole range --
-#: while beta over the same range runs 1.026 / 0.855 / 0.733 / 0.641 / 0.570.  RMSE
-#: barely distinguishes them and beta strongly does, so the factor is set where
-#: beta calibrates, at a 2.7% RMSE cost against its own optimum of 0.32.
-#:
-#: Pearson r is unchanged at +0.398 by every value of k, as it must be: a positive
-#: scalar cannot move a correlation.  Shrinkage is worth a large slice of RMSE and
-#: all of beta, and provably nothing on the leaderboard's sort key.
-GLOBAL_SHRINK = 0.25
+#: Pearson r is unchanged by every value of the global factor, as it must be: a
+#: positive scalar cannot move a correlation.  Global shrinkage is worth a large
+#: slice of RMSE and all of beta, and provably nothing on the sort key.
+GLOBAL_SHRINK = 0.375
 
 
 def hybrid_default(
     effects_from: str | tuple[str, ...] = BEST_RANKERS,
     grounded: str = GROUNDED,
     shrink: float | None = GLOBAL_SHRINK,
+    within_shrink: float | None = WITHIN_SHRINK,
 ) -> Recipe:
     """The component hybrid: the best rankers' averaged effects, one model's context.
 
-    **``shrink`` defaults to 0.25, after two wrong turns worth recording.**  The
+    **``shrink`` defaults to 0.375, after two wrong turns worth recording.**  The
     factor was first taken from Voelkel alone (0.159), then dropped entirely on the
     grounds that real effect magnitudes differ 4.5-fold between studies (Voelkel
     1.125 pp, Goldwert 2.967, ICPC 5.035) so no single target could transfer.  That
@@ -422,6 +444,7 @@ def hybrid_default(
         offsets_from=grounded,
         residuals_from=grounded,
         shrink=shrink,
+        within_shrink=within_shrink,
         flatten_noise=True,
         notes=(
             "Averaged condition effects from the better rankers; levels, "

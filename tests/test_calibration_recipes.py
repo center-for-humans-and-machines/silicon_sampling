@@ -164,19 +164,30 @@ def test_describe_names_every_moving_part():
 
 
 def test_the_default_shrinks_at_the_measured_ratio():
-    """Shrinkage is on by default, and 0.2 is the number that transfers.
+    """Shrinkage is on by default, and the two factors ship as a matched pair.
 
     Absolute human effect magnitudes differ 4.5-fold across the reference studies,
-    so no absolute effect *target* transfers — but the RMSE-optimal *ratio* does.
-    Measured on matched pairs it is 0.112-0.226 across every (study, model) cell,
-    and leave-one-study-out puts its out-of-fold estimates at 0.198-0.222.
+    so no absolute effect *target* transfers -- but the fitted *ratio* does.
 
-    The distinction matters because an earlier version of this project dropped
-    shrinkage entirely after comparing our effects against human effects computed
-    on other studies' pair sets, which is not a comparison at all.
+    The number moved twice.  It was first fitted partly on the ICPC and Goldwert
+    samples taken before the fidelity audit, whose questionnaires printed slider
+    endpoint labels without their 0-100 range; those models answered on an
+    implicit 0-10 scale and their effects came out compressed about five-fold, so
+    the shrinkage fitted against them was too aggressive.  Re-fitted on the
+    audited samples it roughly doubled.
+
+    It then moved again because the global factor and the within-outcome factor
+    interact: out-of-fold the best global k falls from 0.475 to 0.250 as the
+    within factor rises from 0.2 to 1.0.  Pairing the no-within value with
+    within-shrinkage 0.5 overshoots to beta 1.53, which is what this test guards.
     """
     assert R.hybrid_default().shrink == pytest.approx(R.GLOBAL_SHRINK)
-    assert 0.1 < R.GLOBAL_SHRINK < 0.3
+    assert R.hybrid_default().within_shrink == pytest.approx(R.WITHIN_SHRINK)
+    assert 0.25 < R.GLOBAL_SHRINK < 0.55
+    # The pair has to stay on the fitted line k ~= 0.525 - 0.275 * within; a
+    # constant changed on its own is the failure mode this catches.
+    expected = 0.525 - 0.275 * R.WITHIN_SHRINK
+    assert R.GLOBAL_SHRINK == pytest.approx(expected, abs=0.06)
     scale = R.HUMAN_EFFECT_SCALE
     # the absolute magnitudes really do disagree; it is the ratio that does not
     assert max(scale.values()) / min(scale.values()) > 4.0

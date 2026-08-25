@@ -61,7 +61,7 @@ def entries(anchors: dict[str, float]) -> list[tuple[str, R.Recipe]]:
         level_from=grounded,
         offsets_from=grounded,
         residuals_from=grounded,
-        within_shrink=0.5,
+        within_shrink=R.WITHIN_SHRINK,
         flatten_noise=True,
         level_anchors=anchors,
     )
