@@ -6,10 +6,13 @@ the Pfänder samples scored against themselves where no human data exists.
 Reproduce with [`scripts/verify_calibration_levers.py`](../../../scripts/verify_calibration_levers.py)
 and [`scripts/select_calibration.py`](../../../scripts/select_calibration.py).
 
-Sub-reports: [1 · the metric map](01_metric_map.md) ·
-[2 · what the models are each good at](02_model_components.md) ·
-[3 · methodological traps](03_traps.md) ·
-[4 · what ensembling means per respondent](04_ensembling.md)
+Sub-reports: [methodological traps](03_traps.md) ·
+[what ensembling means per respondent](04_ensembling.md)
+
+**Superseded in part.** The ICPC and Goldwert figures this report's later
+sections rest on were measured before the fidelity audit, and the shrinkage
+constants derived here have since been refitted. See the
+[final report](../README.md) for the numbers that ship.
 
 ## The one-paragraph version
 
