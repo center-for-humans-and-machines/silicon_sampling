@@ -709,6 +709,22 @@ def _numeric_range(payload: dict) -> tuple[int, int] | None:
 #:
 #: The fix is to restore the missing context rather than to instruct the model: the
 #: note describes the page the participant saw, and nothing more.
+#: Notes restoring a same-page reference that serialising the page destroyed.
+#:
+#: A Qualtrics page shows its questions at once; a transcript shows them in
+#: sequence, and a prompt that says "below" then points at nothing.  The letter
+#: box is the case that bit: its prompt ends "please include your zipcode below
+#: and we will look up the name for you", and the zipcode box is the *next*
+#: question.  Read in sequence that is an instruction to type a zipcode, and the
+#: models obeyed it -- median answer length 5 characters, and 46-59% of answers a
+#: bare zipcode, against a question asking what the respondent would say to their
+#: representative about climate change.
+#:
+#: The note alone did not fix it: the stimulus paragraph's own last sentence still
+#: ends on the zipcode, and it is the last thing read before answering.  So the
+#: **slot annotation** says what the box collects.  That annotation is our own
+#: scaffolding rather than anything a participant saw, so putting the box's
+#: purpose there changes no stimulus text.
 SAME_PAGE_NOTES = {
     "letter_content": (
         "(The zipcode box referred to is a separate question on this same page, "
@@ -716,10 +732,20 @@ SAME_PAGE_NOTES = {
     ),
 }
 
+#: What a free-text box collects, where its prompt alone is misleading in prose.
+SLOT_PURPOSE = {
+    "letter_content": "the message itself, not a zipcode",
+}
+
 
 def same_page_note(slot_id: str) -> str:
     """Any note restoring a same-page reference this slot's prompt makes."""
     return SAME_PAGE_NOTES.get(slot_id, "")
+
+
+def slot_purpose(slot_id: str) -> str:
+    """What this box collects, for the slot annotation, or an empty string."""
+    return SLOT_PURPOSE.get(slot_id, "")
 
 
 def convert_question(
@@ -826,6 +852,7 @@ def convert_question(
                     hint="Free text.",
                     max_tokens=120,
                     max_chars=1200,
+                    purpose=slot_purpose(slot_id),
                 )
             ]
         return (

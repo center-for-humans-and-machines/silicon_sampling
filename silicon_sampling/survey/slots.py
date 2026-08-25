@@ -240,6 +240,12 @@ class FreeTextSlot(Slot):
     hint: str = "Free text."
     max_tokens: int = 60
 
+    #: What this box collects, where the prompt alone is misleading once the page
+    #: it sat on has been serialised into a sequence.  Shown inside the response
+    #: annotation rather than in the question text, because the annotation is
+    #: scaffolding this project adds and the question text is the stimulus.
+    purpose: str = ""
+
     _compiled: dict = field(default_factory=dict, repr=False, compare=False)
 
     @property
@@ -248,7 +254,8 @@ class FreeTextSlot(Slot):
 
     @property
     def legal_spec(self) -> str:
-        return self.pattern if self.pattern else f"free text, <= {self.max_chars} chars"
+        spec = self.pattern if self.pattern else f"free text, <= {self.max_chars} chars"
+        return f"{self.purpose}; {spec}" if self.purpose else spec
 
     def describe(self) -> str:
         return self.hint
