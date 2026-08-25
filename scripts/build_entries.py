@@ -69,7 +69,10 @@ def entries(anchors: dict[str, float]) -> list[tuple[str, R.Recipe]]:
         (
             "primary",
             R.Recipe(
-                name="combined", effects_from=best, shrink=R.GLOBAL_SHRINK, **common
+                name="combined",
+                effects_from=best,
+                shrink=R.shrink_for_runs(len(best)),
+                **common,
             ),
         ),
         (

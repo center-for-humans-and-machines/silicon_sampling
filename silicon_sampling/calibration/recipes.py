@@ -330,7 +330,12 @@ def apply(
 
 
 #: The effect ensemble that scored best on the leaderboard's sort key.
-BEST_RANKERS = ("qwen25_7b", "qwen25_72b")
+BEST_RANKERS = (
+    "qwen25_7b",
+    "qwen25_7b_seed2",
+    "qwen25_72b",
+    "qwen25_72b_seed2",
+)
 
 #: The run three independent sources agree is closest to real response levels.
 GROUNDED = "v4_flash"
@@ -393,6 +398,44 @@ WITHIN_SHRINK = 0.5
 #: positive scalar cannot move a correlation.  Global shrinkage is worth a large
 #: slice of RMSE and all of beta, and provably nothing on the sort key.
 GLOBAL_SHRINK = 0.375
+
+#: Reliability of the averaged Pfander effect vector, by how many runs it averages.
+#:
+#: Measured directly: the shipped 7B+72B ensemble correlates 0.866 with the
+#: ensemble built from those two models' independent second seeds, over the same
+#: 208 (outcome, condition) pairs.  That correlation *is* the reliability of a
+#: two-run ensemble, and Spearman-Brown extends it to four runs.  Single-run
+#: reliabilities, measured the same way, are 0.870 for Qwen2.5-7B and 0.745 for
+#: Qwen2.5-72B, so roughly 13% and 26% of each model's effect variance is nothing
+#: but which respondents it happened to draw.
+ENSEMBLE_RELIABILITY = {1: 0.808, 2: 0.866, 4: 0.928}
+
+#: How many runs :data:`GLOBAL_SHRINK` was fitted against.
+SHRINK_FITTED_AT_RUNS = 2
+
+
+def shrink_for_runs(n_runs: int, base: float | None = None) -> float | None:
+    """:data:`GLOBAL_SHRINK`, adjusted for how noisy an ensemble it is applied to.
+
+    The shrinkage factor is ``cov(h, l) / var(l)``.  Averaging more independent
+    runs strips sampling noise out of ``var(l)`` without touching ``cov(h, l)``,
+    because that noise is uncorrelated with the human effects -- so the optimal
+    factor rises in exact proportion to the reliability.
+
+    This matters because the factor is fitted on the calibration studies, where
+    only one run per model exists, and then applied to Pfander, where four do.
+    Carrying the two-run factor onto a four-run ensemble would over-shrink by
+    about 7%.  It cannot touch the sort key either way; a positive scalar cannot
+    move a correlation.
+    """
+    base = GLOBAL_SHRINK if base is None else base
+    if base is None:
+        return None
+    here = ENSEMBLE_RELIABILITY.get(n_runs)
+    fitted = ENSEMBLE_RELIABILITY[SHRINK_FITTED_AT_RUNS]
+    if here is None:  # an ensemble size nobody measured; leave the factor alone
+        return base
+    return base * here / fitted
 
 
 def hybrid_default(
