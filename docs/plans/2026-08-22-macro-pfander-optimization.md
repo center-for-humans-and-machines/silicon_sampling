@@ -612,6 +612,42 @@ All four `_v3` re-samples are in (7B locally, 72B and V4-Flash on DAIS).
   existed, and severity does not predict recovery among the rest.
 - **Final report** at `docs/reports/README.md` with five sub-reports.
 
+### The demographic composition gap, found 2026-08-25
+
+`scripts/verify_submission.py` runs every scored analysis over a built entry and
+reports anything undefined -- which the format checker cannot see. It found that
+the three moderators Pfander does *not* print in the profile are all badly skewed,
+because the model invents them: 0.8% of respondents under $30,000 against a real
+13.5%, 3.5% without a high-school diploma against 9%, 13% Republican against 29%.
+
+That is not cosmetic. `Less than $30,000` is the dummy-coding reference level for
+every income interaction and holds 18 respondents in the control arm, below the
+benchmark's `min_group_n` of 30, so it is skipped and income effects are
+estimated against a level that is not there.
+
+`profiles_prefilled.csv` draws all three from the CCAM joint distribution
+instead, giving 12.9% / 9.4% / 28.2%. Re-sampling on it is in flight for all
+three models under the `_demo` run keys. Composition can only be fixed at
+sampling time, unlike the *size* of a demographic gap, which the party anchors
+correct after the fact.
+
+### A DAIS outage, and what it cost
+
+The cluster link died at 01:47 UTC on 2026-08-25 and came back around 07:10 --
+every operation, including plain `squeue`, returning
+`exit 255: Connection closed by UNKNOWN port 65535`. Notified the user per the
+standing rule and continued on the local GPU.
+
+It cost almost nothing, for two reasons worth keeping. Slurm does not care about
+the submitting host, so job 421979 ran on through the outage and took
+`qwen25_72b_seed3` from 896 to 8,192 respondents unattended; and `answers.jsonl`
+is the source of truth, so resubmitting asked only for the remainder. The one
+real hazard was the auto-resume loop: its `queued()` check greps `squeue` output,
+which during the outage returned an error string that matched nothing, so it
+concluded no job was queued and tried to submit six times. The submissions all
+failed at the same precheck, so no duplicates were created -- but the loop should
+distinguish "no job queued" from "cannot tell", and it does not.
+
 ### Negative results worth keeping
 
 - **Per-moderator offset rescaling does not transfer.** Out-of-fold it takes
