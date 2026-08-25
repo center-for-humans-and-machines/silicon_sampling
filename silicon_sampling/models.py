@@ -39,6 +39,13 @@ MODELS = {
     "qwen25_7b_v3": "Qwen/Qwen2.5-7B",
     "qwen25_72b_v3": "Qwen/Qwen2.5-72B",
     "v4_flash_v3": "deepseek-ai/DeepSeek-V4-Flash-Base",
+    # A third independent draw of respondents for each ranker.  Roughly 13% of
+    # Qwen2.5-7B's Pfander effect variance and 26% of Qwen2.5-72B's is sampling
+    # noise, and the submission averages the runs, so each extra seed buys a
+    # little more of the signal: measured reliability goes 0.866 at two runs to
+    # 0.928 at four, and Spearman-Brown puts six at about 0.951.
+    "qwen25_7b_seed3": "Qwen/Qwen2.5-7B",
+    "qwen25_72b_seed3": "Qwen/Qwen2.5-72B",
 }
 
 #: Human-readable names for report tables and plot legends.
@@ -51,6 +58,8 @@ LABELS = {
     "qwen25_7b_v2": "Qwen2.5-7B (scale stated)",
     "qwen25_72b_v2": "Qwen2.5-72B (scale stated)",
     "v4_flash_v2": "DeepSeek-V4-Flash (scale stated)",
+    "qwen25_7b_seed3": "Qwen2.5-7B (replicate 3)",
+    "qwen25_72b_seed3": "Qwen2.5-72B (replicate 3)",
     "qwen25_7b_v3": "Qwen2.5-7B (audited)",
     "qwen25_72b_v3": "Qwen2.5-72B (audited)",
     "v4_flash_v3": "DeepSeek-V4-Flash (audited)",
