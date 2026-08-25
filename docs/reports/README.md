@@ -13,7 +13,7 @@ Sub-reports: [calibration design](calibration_design/README.md) ·
 
 | entry | recipe | why it exists |
 | --- | --- | --- |
-| **primary** | four Qwen runs' averaged effects, shrunk within-outcome by 0.5 then globally by 0.402; levels, demographic offsets and residual structure from DeepSeek-V4-Flash; three outcomes anchored to external survey levels | best on every metric we can measure out-of-fold |
+| **primary** | four Qwen runs' averaged effects, shrunk within-outcome by 0.5 then globally by 0.402; levels, offsets and residual structure from DeepSeek-V4-Flash with residuals scaled 0.90; party offsets from Qwen2.5-72B blended half-way to external gaps; three outcomes anchored to external survey levels | best on every metric we can measure out-of-fold |
 | secondary-1 | the same, without the global shrinkage | hedges the one calibration constant that would be badly wrong if Pfänder's real effects are much larger than the three reference studies' |
 | secondary-2 | raw Qwen2.5-7B, uncalibrated | the no-assumptions baseline; makes every calibration's contribution measurable after the fact |
 
@@ -142,7 +142,24 @@ work, and the negative result is worth as much as the positive one: out-of-fold
 it takes offset r from 0.165 to 0.078 and from 0.176 to 0.003. Rescaling
 multiplies signal that is not there. [Details.](party_calibration.md)
 
-### 6. Text-only sampling, and where it cannot reach
+### 6. The response-shape gap is spread, not digit preference
+
+These models answer with more within-cell spread than real participants — pooled
+over the sliders of all three reference studies the synthetic standard deviation
+is about 1.07× the human one, and larger in seven of nine (study, model) cells.
+Scaling the **residual term** by 0.90 raises the KDE overlap in all nine, by
++0.026 on average. It reaches only the within-cell spread: level, effects and
+demographic offsets are separate terms of the decomposition, so this cannot move
+the sort key.
+
+The obvious competing explanation is wrong, and worth recording. The models are
+far spikier than humans on round numbers — Qwen2.5-72B puts **78%** of 0–100
+slider answers on a multiple of ten against a human **34%**. But OVL is a
+kernel-density overlap and W1 and KS are ECDF-based, so jittering answers off the
+spikes moved OVL by 0.000 in eleven of twelve cells. A real and visible artefact
+that none of the scored metrics can see.
+
+### 7. Text-only sampling, and where it cannot reach
 
 Pfänder's instrument is **pure text** — no images, video, audio or embeds — so
 the handicap does not apply to the target study at all. In Goldwert the seven
