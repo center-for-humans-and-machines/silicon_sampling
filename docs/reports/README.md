@@ -120,7 +120,29 @@ global factor falls from 0.475 to 0.250 as the within factor rises from 0.2 to
 The shipped pair is (within 0.5, global 0.402 after the four-run noise
 adjustment), giving β 1.018 out-of-fold.
 
-### 5. Text-only sampling, and where it cannot reach
+### 5. The party gap is topic-blind, not merely too small
+
+Asked whether the models under-use party, the answer is yes — but the shape of
+the error is what makes it fixable. The real Democrat–Republican gap depends
+enormously on topic: TISP's twelve Besley items, Pfänder's exact trust battery,
+put it at **4.0 pp** for trust in scientists, while CCAM puts climate policy
+priority at **52 pp**. The models apply a roughly uniform gap, so Qwen2.5-72B
+gives 14.6 pp for the trust battery and 27.9 for policy — nearly right on the
+second, almost four times over on the first.
+
+It has the ordering right (r = +0.838 with the external estimates) and the
+spread wrong, so the fix is to reshape the profile rather than to inflate it.
+Party offsets now come from Qwen2.5-72B, because Pfänder *elicits* party rather
+than printing it in the profile, and the per-outcome profile is blended half-way
+to external anchors. Party-gap error against external truth falls **19.09 →
+9.81 (what shipped) → 7.39 → 3.93 pp**.
+
+The obvious version of this — fitting per-moderator rescaling factors — does not
+work, and the negative result is worth as much as the positive one: out-of-fold
+it takes offset r from 0.165 to 0.078 and from 0.176 to 0.003. Rescaling
+multiplies signal that is not there. [Details.](party_calibration.md)
+
+### 6. Text-only sampling, and where it cannot reach
 
 Pfänder's instrument is **pure text** — no images, video, audio or embeds — so
 the handicap does not apply to the target study at all. In Goldwert the seven
