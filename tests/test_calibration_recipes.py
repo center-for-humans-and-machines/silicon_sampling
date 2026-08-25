@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 
 from silicon_sampling.calibration import components as C
+from silicon_sampling.calibration import offsets as OFF
 from silicon_sampling.calibration import recipes as R
 from silicon_sampling.calibration import tier1 as T1
 
@@ -191,3 +192,38 @@ def test_the_default_shrinks_at_the_measured_ratio():
     scale = R.HUMAN_EFFECT_SCALE
     # the absolute magnitudes really do disagree; it is the ratio that does not
     assert max(scale.values()) / min(scale.values()) > 4.0
+
+
+def test_party_gaps_move_toward_the_external_anchors():
+    """The party calibration closes the gap it is supposed to, and only that.
+
+    Party is the one Pfander moderator the model is not told: it is elicited at
+    Q16, before almost every outcome.  The real gap is strongly topic-dependent --
+    4.0 pp on the trust battery TISP measures item-for-item, 27 pp on climate
+    policy -- and the models apply a roughly uniform one, so the anchors pull the
+    per-outcome profile into shape rather than inflating everything.
+    """
+    weight = R.PARTY_GAP_WEIGHT
+    assert 0.0 < weight <= 1.0
+    # Half, not all: two of the three public sources contrast ideology, not party.
+    assert weight < 1.0
+    anchors = R.PARTY_GAP_ANCHORS
+    # The topic spread is the whole point; a flat set of anchors would do nothing
+    # that the donor model does not already do.
+    assert max(anchors.values()) / min(anchors.values()) > 5.0
+    assert anchors["trust_multidimensional"] < anchors["policy_general"]
+
+    levels = pd.Series(0.0, index=["Democrat", "Republican", "Independent"])
+    shares = pd.Series({"Democrat": 400, "Republican": 350, "Independent": 250})
+    imposed = OFF.impose_gap(levels, 20.0, "Democrat", "Republican", shares)
+    assert imposed["Democrat"] - imposed["Republican"] == pytest.approx(20.0)
+    # Offsets are deviations from the arm mean, so they must stay centred or the
+    # calibration would move the level while fixing the gap.
+    assert float((imposed * shares).sum() / shares.sum()) == pytest.approx(0.0)
+
+
+def test_impose_gap_leaves_a_moderator_it_cannot_place_alone():
+    """A missing level means missing information, not a finding of no gap."""
+    levels = pd.Series({"Yes": 1.0, "No": -1.0})
+    same = OFF.impose_gap(levels, 20.0, "Democrat", "Republican")
+    pd.testing.assert_series_equal(same, levels)

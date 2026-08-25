@@ -241,3 +241,72 @@ def blend_offsets(
             aligned.isna(), weight * aligned + (1 - weight) * table
         )
     return out
+
+
+def impose_gap(
+    offsets: pd.Series,
+    gap: float,
+    high: str,
+    low: str,
+    shares: pd.Series | None = None,
+) -> pd.Series:
+    """Rebuild one moderator's offsets so *high* sits ``gap`` above *low*.
+
+    **This replaces our own offsets rather than rescaling them, and that is the
+    point.** Rescaling multiplies whatever signal is there; when the signal is
+    near zero, as the models' party offsets are, the factor needed to reach a
+    realistic gap is 20-50x and it amplifies noise far faster than signal.
+    Measured against real Goldwert participants, rescaling the best model's party
+    offsets to match the human spread cut RMSE only from 15.28 to 14.08 -- while
+    substituting a single externally known constant cut it to 6.08.
+
+    So the external number is used as the offsets, not as a target to stretch
+    toward. Levels other than *high* and *low* are placed at zero, and the whole
+    series is then centred on the population shares so it stays a set of
+    deviations from the arm mean rather than shifting the level.
+
+    ``gap`` is in the same units as ``offsets``.
+    """
+    out = pd.Series(0.0, index=offsets.index, dtype=float)
+    if high not in out.index or low not in out.index:
+        return offsets
+    out[high] = gap / 2.0
+    out[low] = -gap / 2.0
+    if shares is None:
+        weights = pd.Series(1.0, index=out.index)
+    else:
+        weights = shares.reindex(out.index).fillna(0.0)
+    total = float(weights.sum())
+    if total > 0:
+        out = out - float((out * weights).sum() / total)
+    return out
+
+
+def party_offsets_from_gaps(
+    frame: pd.DataFrame,
+    gaps: dict[str, float],
+    scales: dict[str, float],
+    moderator: str = "party",
+    high: str = "Democrat",
+    low: str = "Republican",
+) -> dict[str, dict[str, pd.Series]]:
+    """Externally anchored party offsets, one entry per outcome in *gaps*.
+
+    ``gaps`` are Democrat-minus-Republican differences in **pp of scale range**,
+    which is how every external source in this project reports them; ``scales``
+    converts each outcome back to its own units.
+    """
+    if moderator not in frame.columns:
+        return {}
+    shares = frame[moderator].value_counts()
+    built: dict[str, dict[str, pd.Series]] = {}
+    for outcome, gap in gaps.items():
+        if outcome not in frame.columns or outcome not in scales:
+            continue
+        levels = pd.Series(0.0, index=shares.index, dtype=float)
+        built[outcome] = {
+            moderator: impose_gap(
+                levels, gap / 100.0 * scales[outcome], high, low, shares
+            )
+        }
+    return built

@@ -88,6 +88,32 @@ class Recipe:
     level_anchors: dict[str, float] | None = None
     #: Per-moderator factors on the demographic offsets.
     offset_scales: dict[str, float] | None = None
+    #: Which run supplies the *party* offsets, when that is not ``offsets_from``.
+    #:
+    #: Party is the one moderator Pfander does not hand the model.  Gender, race
+    #: and age are printed in the profile; party is **elicited** at Q16 on page 6,
+    #: before almost every outcome, so the party structure in a Pfander sample is
+    #: the model's own consistency rather than a demographic it was told to
+    #: perform.  That makes it a different measurement from the one the reference
+    #: studies grade, where party is given, and the two disagree about which model
+    #: is best at it.
+    #:
+    #: Scored against external estimates of the real US party gap on Pfander's own
+    #: outcomes, Qwen2.5-72B's elicited party structure is much the closest --
+    #: r = +0.838 and RMSE 7.5 pp over eight outcomes, against DeepSeek-V4-Flash's
+    #: +0.487 and 9.8, Qwen2.5-7B's -0.306 and 18.2, and 19.1 for submitting no
+    #: party gap at all.  On the moderators that *are* given, V4-Flash remains the
+    #: better donor in both reference studies (pooled offset r 0.190 on Voelkel and
+    #: 0.177 on Goldwert), so the two are taken from different runs.
+    party_offsets_from: str | None = None
+    #: Externally estimated Democrat-minus-Republican gaps, in pp of scale range,
+    #: and how far to move our own party offsets toward them (0 = ours, 1 = theirs).
+    #:
+    #: Partial rather than full substitution, because the estimates are good but
+    #: not measurements of Pfander: they come from three public datasets, and two
+    #: of the three contrast ideology rather than party.
+    party_gap_anchors: dict[str, float] | None = None
+    party_gap_weight: float = 0.0
     #: Shrink outcomes whose effect spread is pure noise.
     flatten_noise: bool = False
     notes: str = ""
@@ -114,6 +140,7 @@ class Recipe:
             self.level_from,
             self.offsets_from,
             self.residuals_from,
+            self.party_offsets_from,
         ]
         seen: list[str] = []
         for name in wanted:
@@ -318,6 +345,53 @@ def apply(
             for outcome in design.outcomes
             if outcome not in design.binary and outcome in frame.columns
         }
+    if recipe.party_offsets_from and "party" in design.moderators:
+        donor = runs.get(recipe.party_offsets_from)
+        if donor is not None:
+            if offsets is None:
+                offsets = {
+                    outcome: C.decompose(
+                        frame, outcome, design.moderators, design.control
+                    ).offsets
+                    for outcome in design.outcomes
+                    if outcome not in design.binary and outcome in frame.columns
+                }
+            for outcome, table in offsets.items():
+                if outcome not in donor.columns:
+                    continue
+                theirs = C.decompose(
+                    donor, outcome, design.moderators, design.control
+                ).offsets
+                if "party" in theirs:
+                    table["party"] = theirs["party"]
+    if recipe.party_gap_anchors and recipe.party_gap_weight:
+        if offsets is None:
+            offsets = {
+                outcome: C.decompose(
+                    frame, outcome, design.moderators, design.control
+                ).offsets
+                for outcome in design.outcomes
+                if outcome not in design.binary and outcome in frame.columns
+            }
+        shares = (
+            frame.loc[frame["condition"] == design.control, "party"].value_counts()
+            if "party" in frame.columns
+            else None
+        )
+        for outcome, table in offsets.items():
+            target = recipe.party_gap_anchors.get(outcome)
+            if target is None or "party" not in table:
+                continue
+            wanted = OFF.impose_gap(
+                table["party"],
+                target / 100.0 * design.scales[outcome],
+                "Democrat",
+                "Republican",
+                shares,
+            )
+            table["party"] = (1.0 - recipe.party_gap_weight) * table[
+                "party"
+            ] + recipe.party_gap_weight * wanted
 
     return tier1.calibrate(
         frame,
@@ -339,6 +413,60 @@ BEST_RANKERS = (
 
 #: The run three independent sources agree is closest to real response levels.
 GROUNDED = "v4_flash"
+
+#: Which run supplies party offsets; see ``Recipe.party_offsets_from``.
+PARTY_DONOR = "qwen25_72b"
+
+#: Externally estimated Democrat-minus-Republican gaps on Pfander's outcomes, in
+#: pp of scale range.  Every number comes from public data and none from Pfander.
+#:
+#: The point of having these at all is that the real party gap is **strongly
+#: topic-dependent** and the models apply a roughly uniform one.  Trust in
+#: scientists is barely polarised -- TISP's twelve Besley items, the same battery
+#: Pfander scores, put the US left-right gap at 4.0 pp -- while climate policy
+#: priority is polarised enormously, at 28-52 pp in CCAM.  Qwen2.5-72B gives
+#: 14.6 pp for the trust battery and 27.9 for policy: right about the second and
+#: nearly four times over on the first.
+#:
+#: Grades, worst first, because they set the blend weight rather than being hidden:
+#:
+#: * ``trust_multidimensional``, ``trust_post``, ``policy_role_mean`` -- TISP,
+#:   ``near`` grade, 12 / 2 / 4 items.  The strongest evidence here: same battery,
+#:   same population, item-for-item.
+#: * ``policy_specific_mean`` -- TISP, 5 ``construct-only`` climate-policy items.
+#: * ``belief_post`` -- the ICPC tournament's US control arm, an online
+#:   experimental sample much like Pfander's, split left against right.
+#: * ``concern_mean``, ``policy_general`` -- CCAM's ``worry`` and ``priority``
+#:   items, 44.5 and 52.0 pp, shrunk by 0.6.  CCAM is a nationally representative
+#:   panel and its gaps run larger than experimental samples': where the two can
+#:   be compared, ICPC's belief gap is 0.71 of CCAM's worry gap and Goldwert's
+#:   behaviour gap 0.45 of CCAM's discussion gap.
+#: * ``behavior_mean`` -- ICPC's sharing gap (7.3) with Goldwert's advocacy gap
+#:   (14.0), which bracket it.
+#:
+#: Two of the three sources contrast **ideology** rather than party, which is why
+#: these are blended toward rather than substituted for; see
+#: :data:`PARTY_GAP_WEIGHT`.
+PARTY_GAP_ANCHORS = {
+    "trust_multidimensional": 4.0,
+    "trust_post": 11.3,
+    "policy_role_mean": 7.4,
+    "policy_specific_mean": 13.7,
+    "belief_post": 31.7,
+    "concern_mean": 26.7,
+    "policy_general": 26.7,
+    "behavior_mean": 10.0,
+}
+
+#: How far to move party offsets toward :data:`PARTY_GAP_ANCHORS`.
+#:
+#: Half, deliberately.  Full substitution would claim these estimates *are*
+#: Pfander's party gaps, which they are not -- different instruments, and two of
+#: three contrasting ideology rather than party.  Zero would keep a 14.6 pp party
+#: gap on a trust battery that twelve matched items say is 4.0.  Half moves the
+#: measured distance to the anchors from RMSE 7.4 pp to about 3.7 while leaving
+#: the model's own topic ordering, which is already right (r = +0.835), intact.
+PARTY_GAP_WEIGHT = 0.5
 
 #: Mean absolute human intervention effect, in pp of scale range, per study.
 #: Real effect magnitudes genuinely differ 4.5-fold between these studies, which
@@ -443,6 +571,7 @@ def hybrid_default(
     grounded: str = GROUNDED,
     shrink: float | None = GLOBAL_SHRINK,
     within_shrink: float | None = WITHIN_SHRINK,
+    party_offsets_from: str | None = PARTY_DONOR,
 ) -> Recipe:
     """The component hybrid: the best rankers' averaged effects, one model's context.
 
@@ -488,6 +617,7 @@ def hybrid_default(
         residuals_from=grounded,
         shrink=shrink,
         within_shrink=within_shrink,
+        party_offsets_from=party_offsets_from,
         flatten_noise=True,
         notes=(
             "Averaged condition effects from the better rankers; levels, "
@@ -541,6 +671,8 @@ def describe(recipe: Recipe) -> str:
         parts.append(f"shrink={recipe.shrink:g}")
     if recipe.within_shrink is not None:
         parts.append(f"within={recipe.within_shrink:g}")
+    if recipe.party_offsets_from:
+        parts.append(f"party-offsets={recipe.party_offsets_from}")
     if recipe.profile_weight:
         parts.append(f"profile_w={recipe.profile_weight:g}")
     if recipe.level_anchors:
