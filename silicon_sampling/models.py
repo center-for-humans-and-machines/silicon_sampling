@@ -103,3 +103,43 @@ def model_id(run: str) -> str:
 def label(run: str) -> str:
     """The name this run goes by in a report."""
     return LABELS.get(run, run)
+
+
+#: Studies whose questionnaire the ``_v3`` audit actually changed.
+#:
+#: The slider-range defect — endpoint labels printed without the 0-100 range —
+#: existed only in the ICPC and Goldwert conversions.  Voelkel and Pfänder state
+#: their ranges in the source questionnaire's own prose, so the audit found
+#: nothing to change in them and they were not re-sampled.
+REVISED_STUDIES = ("ICPC", "Goldwert")
+
+
+def base_run(run: str) -> str:
+    """The pre-audit run key that *run* is a re-sample of.
+
+    ``qwen25_72b_v3`` -> ``qwen25_72b``; anything else is returned unchanged.
+    """
+    for suffix in ("_v3", "_v2"):
+        if run.endswith(suffix):
+            return run[: -len(suffix)]
+    return run
+
+
+def resolve_run(samples_dir, run: str) -> str | None:
+    """The run key to *score* for this study, or ``None`` if it has no sample.
+
+    A study with no ``_v3`` directory is usually not missing data.  Only ICPC and
+    Goldwert were re-sampled, because only their templates changed; Voelkel's v1
+    sample was taken on a template the audit would have left alone, so it is the
+    audited sample for that study and belongs in the comparison.  Treating it as
+    absent is what silently cut leave-one-study-out from three folds to two, and
+    two folds cannot show that a parameter is stable.
+
+    Falls back only when the fallback exists, and never crosses models.
+    """
+    if (samples_dir(run) / "samples.csv").exists():
+        return run
+    fallback = base_run(run)
+    if fallback != run and (samples_dir(fallback) / "samples.csv").exists():
+        return fallback
+    return None

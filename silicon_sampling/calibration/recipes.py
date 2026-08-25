@@ -344,16 +344,34 @@ HUMAN_EFFECT_SCALE = {
     "ICPC": 5.035,  # climate belief and policy, US subsample
 }
 
-#: The RMSE-optimal shrinkage factor, measured on matched pairs in every
-#: (study, model) cell available: 0.159 / 0.125 / 0.112 for the three models on
-#: Voelkel, 0.216 on ICPC and 0.226 on Goldwert for Qwen2.5-72B.
-#: Leave-one-study-out puts its out-of-fold estimates at 0.198-0.222, a spread of
-#: 1.12x.
+#: The shrinkage factor applied to the averaged effect vector before submission.
 #:
-#: The *ratio* transfers even though neither of its parts does, which is what makes
-#: it usable: human effects run 1.1 to 5.0 pp across these studies and ours run 2.8
-#: to 5.5, and the quotient stays near 0.2.
-GLOBAL_SHRINK = 0.2
+#: **Re-derived on the audited (`_v3`) samples; the earlier 0.2 was fitted partly
+#: on broken ones.**  The ICPC and Goldwert questionnaires printed slider endpoint
+#: labels without their 0-100 range, so those models answered on an implicit 0-10
+#: scale and every effect in those two studies came out compressed roughly
+#: five-fold.  The shrinkage fitted against that compression was correspondingly
+#: too aggressive.
+#:
+#: Two different factors are defensible and they no longer agree.  Fitting through
+#: the origin (Sigma hl / Sigma l^2) minimises RMSE; fitting with an intercept
+#: (cov/var) is what drives the benchmark's beta to 1.  On Voelkel these matched to
+#: 0.25% because its mean signed human effect is -0.06 pp.  On ICPC and Goldwert
+#: the mean signed effect is +3.2 and +2.8 pp -- nearly every arm pushes the same
+#: way -- so the through-origin fit absorbs that mean into its slope and the two
+#: diverge two-fold (0.46 against 0.27 on ICPC, 0.60 against 0.28 on Goldwert).
+#:
+#: The choice between them is decided by how flat the RMSE curve is.  Out-of-fold
+#: over the three studies, mean RMSE runs 3.099 / 3.056 / 3.028 / 3.018 / 3.024 at
+#: k = 0.25 / 0.30 / 0.35 / 0.40 / 0.45 -- a 1.7% spread across the whole range --
+#: while beta over the same range runs 1.026 / 0.855 / 0.733 / 0.641 / 0.570.  RMSE
+#: barely distinguishes them and beta strongly does, so the factor is set where
+#: beta calibrates, at a 2.7% RMSE cost against its own optimum of 0.32.
+#:
+#: Pearson r is unchanged at +0.398 by every value of k, as it must be: a positive
+#: scalar cannot move a correlation.  Shrinkage is worth a large slice of RMSE and
+#: all of beta, and provably nothing on the leaderboard's sort key.
+GLOBAL_SHRINK = 0.25
 
 
 def hybrid_default(
@@ -363,7 +381,7 @@ def hybrid_default(
 ) -> Recipe:
     """The component hybrid: the best rankers' averaged effects, one model's context.
 
-    **``shrink`` defaults to 0.2, after one wrong turn worth recording.**  The
+    **``shrink`` defaults to 0.25, after two wrong turns worth recording.**  The
     factor was first taken from Voelkel alone (0.159), then dropped entirely on the
     grounds that real effect magnitudes differ 4.5-fold between studies (Voelkel
     1.125 pp, Goldwert 2.967, ICPC 5.035) so no single target could transfer.  That

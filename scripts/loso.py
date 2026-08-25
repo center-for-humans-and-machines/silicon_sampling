@@ -32,6 +32,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 
+from silicon_sampling import models as MODELS
 from silicon_sampling.benchmark.reference import ate_pairs, half_split
 from silicon_sampling.calibration import effects as E
 from silicon_sampling.calibration import select as SEL
@@ -79,20 +80,28 @@ def registry() -> list[Study]:
     return found
 
 
-def fold_for(study: Study, model: str) -> SEL.Fold | None:
-    """Our effects and the human effects for one study, or None if not sampled yet."""
-    path = study.samples_dir(model) / "samples.csv"
-    if not path.exists():
-        return None
+def fold_for(study: Study, model: str) -> tuple[SEL.Fold | None, str | None]:
+    """Our effects and the human effects for one study, with the run key used.
+
+    Returns ``(None, None)`` when the study has no sample for this model at all.
+    The run key comes back alongside the fold because it is not always the one
+    asked for: only ICPC and Goldwert were re-sampled for the ``_v3`` audit, so
+    the other studies resolve to their v1 run, and a reader has to be told which
+    sample a fold was built from.
+    """
+    run = MODELS.resolve_run(study.samples_dir, model)
+    if run is None:
+        return None, None
+    path = study.samples_dir(run) / "samples.csv"
     sample = pd.read_csv(path, low_memory=False)
     if len(sample) < 100:
-        return None
+        return None, run
     human1, _ = half_split(study.load_humans())
     pairs = ate_pairs(study.effects(human1), study.effects(sample)).dropna(
         subset=["estimate_h", "estimate_l"]
     )
     if len(pairs) < 6:
-        return None
+        return None, run
     predicted = pairs.rename(columns={"estimate_l": "estimate", "se_l": "se"})[
         ["outcome", "condition", "estimate", "se"]
     ]
@@ -102,7 +111,7 @@ def fold_for(study: Study, model: str) -> SEL.Fold | None:
     reference = pairs[["outcome", "condition", "estimate_h", "se_h"]].assign(
         outcome=study.name + "/" + pairs["outcome"]
     )
-    return SEL.Fold(name=study.name, predicted=predicted, reference=reference)
+    return SEL.Fold(name=study.name, predicted=predicted, reference=reference), run
 
 
 def effect_scale(fold: SEL.Fold) -> dict:
@@ -196,12 +205,13 @@ def main() -> int:
     print(f"model: {args.model} | target metric: {args.target}\n")
     folds = []
     for study in registry():
-        fold = fold_for(study, args.model)
+        fold, run = fold_for(study, args.model)
         if fold is None:
             print(f"  {study.name}: no usable sample for {args.model} yet")
             continue
         folds.append(fold)
-        print(f"  {study.name}: {len(fold.predicted)} pairs")
+        note = "" if run == args.model else f"  [from {run}: template unrevised]"
+        print(f"  {study.name}: {len(fold.predicted)} pairs{note}")
 
     if len(folds) < 2:
         print(
