@@ -993,12 +993,15 @@ def test_no_run_on_disk_has_been_rewritten_by_the_prefilled_build(tmp_path):
 
     Both study packages point ``build-profiles`` at a run directory that already
     holds a completed run, so the file is the only record of what those
-    respondents were given.  Prefill adds columns rather than changing any, and
-    this is the assertion that says so about the files themselves: the schema on
-    disk is the pre-prefill schema, and the pre-prefill build still reproduces it
-    byte for byte at the seed it was built with.  A file here that no longer
-    matches means a run's provenance was overwritten, which is not recoverable —
-    ``data/`` is not in version control.
+    respondents were given.  A file here that no longer matches a build this
+    module can reproduce means a run's provenance was overwritten, which is not
+    recoverable — ``data/`` is not in version control.
+
+    Runs now come in both schemas, so the check dispatches on the header rather
+    than demanding one: the ``_demo`` runs are deliberately sampled on prefilled
+    profiles, because a model left to invent its own income and party produces
+    0.8% of respondents under $30,000 against a real 13.5%.  Either schema is
+    legitimate; what is not legitimate is a file matching neither build.
     """
     from silicon_sampling.pfander import profiles as pfander_profiles
     from silicon_sampling.voelkel import profiles as voelkel_profiles
@@ -1011,14 +1014,19 @@ def test_no_run_on_disk_has_been_rewritten_by_the_prefilled_build(tmp_path):
         found = sorted(directory.glob("*/profiles.csv"))
         if not found:
             continue
-        reference = tmp_path / f"{folder}.csv"
-        module.write_csv(module.build(**kwargs), reference)
-        expected = reference.read_bytes()
+        plain = tmp_path / f"{folder}-plain.csv"
+        module.write_csv(module.build(**kwargs), plain)
+        filled = tmp_path / f"{folder}-filled.csv"
+        module.write_csv(module.build(**{k: True for k in kwargs}), filled)
+        expected = {
+            ",".join(module.BASE_FIELDS): plain.read_bytes(),
+            ",".join(module.FIELDS): filled.read_bytes(),
+        }
         identical = 0
         for path in found:
             header = path.read_text(encoding="utf-8").splitlines()[0]
-            assert header == ",".join(module.BASE_FIELDS), path
-            identical += path.read_bytes() == expected
+            assert header in expected, path
+            identical += path.read_bytes() == expected[header]
         # A replicate built at another seed is legitimately different; a run at
         # the default seed is not allowed to be.
         assert identical >= 1, f"{folder}: no run reproduces the default-seed build"

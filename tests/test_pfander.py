@@ -234,11 +234,15 @@ def test_a_profiles_file_without_the_drawn_columns_still_loads_unchanged():
         p.drawn for p in profiles.build(prefill=True)
     ]
 
-    # And any run already on disk is still exactly what this module writes.
+    # And any run already on disk is still exactly what this module writes --
+    # in whichever of the two schemas it was built with.  The `_demo` runs are
+    # deliberately prefilled; the older ones are deliberately not.
     for path in sorted(Path("data/pfander/silicon_sampling").glob("*/profiles.csv")):
         header = path.read_text(encoding="utf-8").splitlines()[0]
-        assert header == ",".join(profiles.BASE_FIELDS), path
-        assert all(profile.drawn == {} for profile in profiles.read_csv(path)), path
+        prefilled = header == ",".join(profiles.FIELDS)
+        assert prefilled or header == ",".join(profiles.BASE_FIELDS), path
+        drawn_is_empty = [p.drawn == {} for p in profiles.read_csv(path)]
+        assert all(d is not prefilled for d in drawn_is_empty), path
 
 
 def test_age_band_boundaries():
