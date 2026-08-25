@@ -363,6 +363,7 @@ def hybrid(
     residuals_from: str | None = None,
     seed: int = 0,
     couple_residuals: bool = True,
+    residual_scale: float = 1.0,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Take each term of the decomposition from whichever run predicts it best.
 
@@ -372,6 +373,11 @@ def hybrid(
 
     The rows come from ``effects_from``: its condition assignment and its
     demographic composition define who the synthetic respondents are.
+
+    ``residual_scale`` multiplies the residual term only, which is how the
+    over-dispersion these models share is corrected without disturbing anything
+    already calibrated: the level, the condition effects and the demographic
+    offsets all survive it untouched, because only the within-cell spread moves.
     """
     level_from = level_from or effects_from
     offsets_from = offsets_from or effects_from
@@ -387,7 +393,8 @@ def hybrid(
             offsets=decompose(runs[offsets_from], outcome, moderators, control).offsets,
             residuals=decompose(
                 runs[residuals_from], outcome, moderators, control
-            ).residuals,
+            ).residuals
+            * residual_scale,
         )
     bounds = {outcome: (0.0, scale) for outcome, scale in outcomes.items()}
     return recompose_frame(

@@ -227,3 +227,18 @@ def test_impose_gap_leaves_a_moderator_it_cannot_place_alone():
     levels = pd.Series({"Yes": 1.0, "No": -1.0})
     same = OFF.impose_gap(levels, 20.0, "Democrat", "Republican")
     pd.testing.assert_series_equal(same, levels)
+
+
+def test_residual_scaling_touches_only_the_within_cell_spread():
+    """It must reach the variance ratio without disturbing the effects.
+
+    Level, condition effects and demographic offsets are separate terms of the
+    decomposition, so scaling residuals cannot move them.  That is the property
+    that makes this safe to stack on top of an already-calibrated effect vector,
+    and it is worth a test because the obvious alternative -- scaling the whole
+    outcome around its mean -- would silently shrink every effect too.
+    """
+    assert 0.5 < R.RESIDUAL_SCALE < 1.0
+    assert R.hybrid_default().residual_scale == pytest.approx(R.RESIDUAL_SCALE)
+    # The uncalibrated baseline must stay untouched, or it stops being a baseline.
+    assert R.uncalibrated("qwen25_7b").residual_scale == pytest.approx(1.0)

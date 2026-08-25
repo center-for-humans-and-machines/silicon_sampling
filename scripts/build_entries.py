@@ -65,6 +65,7 @@ def entries(anchors: dict[str, float]) -> list[tuple[str, R.Recipe]]:
         party_offsets_from=R.PARTY_DONOR,
         party_gap_anchors=R.PARTY_GAP_ANCHORS,
         party_gap_weight=R.PARTY_GAP_WEIGHT,
+        residual_scale=R.RESIDUAL_SCALE,
         flatten_noise=True,
         level_anchors=anchors,
     )
