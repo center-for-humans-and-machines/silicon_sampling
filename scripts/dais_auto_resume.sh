@@ -30,15 +30,32 @@ remote() {
     grep -v gocryptfs /var/cc_output/$rid.log 2>/dev/null
 }
 
-queued() {  # is a job of this run_group in the queue?
-    local rid
-    rid=$(curl -s "$API/jobs?cluster=dais" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+# Is a job of this run_group in the queue?  Three answers, not two: 0 yes, 1 no,
+# 2 "cannot tell".
+#
+# The third one matters.  During a six-hour cluster outage every squeue returned
+# `exit 255: Connection closed by UNKNOWN port 65535`, which matches no job name,
+# so a two-valued check read it as "nothing is queued" and tried to submit six
+# times.  Those submissions happened to fail at the same precheck, so no
+# duplicates were created -- but that was luck, and a link that came back between
+# the check and the submit would have produced a second job against a run that
+# was already going.  A failed lookup now blocks submission instead of licensing
+# it.
+queued() {
+    local rid ec tail
+    rid=$(curl -s --max-time 40 "$API/jobs?cluster=dais" \
+          | python3 -c 'import json,sys; print(json.load(sys.stdin).get("run_id",""))' 2>/dev/null)
+    [ -z "$rid" ] && return 2
     for _ in $(seq 1 25); do
-        [ "$(curl -s $API/runs/$rid | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')" = "exited" ] && break
+        [ "$(curl -s --max-time 20 $API/runs/$rid | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' 2>/dev/null)" = "exited" ] && break
         sleep 3
     done
-    curl -s $API/runs/$rid | python3 -c "import json,sys; print(json.load(sys.stdin)['tail'])" \
-        | grep -qE "[0-9]+ +\S+ +${GROUP:0:8}"
+    ec=$(curl -s --max-time 20 $API/runs/$rid \
+         | python3 -c 'import json,sys; print(json.load(sys.stdin).get("exit_code"))' 2>/dev/null)
+    [ "$ec" = "0" ] || return 2
+    tail=$(curl -s --max-time 20 $API/runs/$rid \
+           | python3 -c "import json,sys; print(json.load(sys.stdin).get('tail',''))" 2>/dev/null)
+    echo "$tail" | grep -qE "[0-9]+ +\S+ +${GROUP:0:8}"
 }
 
 done_now() { remote "n=0; [ -f $ANSWERS ] && n=\$(wc -l < $ANSWERS); echo COUNT=\$n" \
@@ -51,8 +68,11 @@ for i in $(seq 1 500); do
         echo "[$(date -u +%H:%M:%S)] $GROUP COMPLETE: $n/$TARGET after $submissions submissions"
         exit 0
     fi
-    if queued; then
+    queued; q=$?
+    if [ "$q" -eq 0 ]; then
         echo "[$(date -u +%H:%M:%S)] $GROUP $n/$TARGET — a job is queued or running"
+    elif [ "$q" -eq 2 ]; then
+        echo "[$(date -u +%H:%M:%S)] $GROUP $n/$TARGET — cannot reach the cluster; not submitting"
     else
         out=$(curl -s -X POST $API/submit_slurm_job -H 'Content-Type: application/json' -d @"$JSON")
         submissions=$((submissions + 1))
