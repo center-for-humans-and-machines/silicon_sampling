@@ -46,6 +46,16 @@ MODELS = {
     # 0.928 at four, and Spearman-Brown puts six at about 0.951.
     "qwen25_7b_seed3": "Qwen/Qwen2.5-7B",
     "qwen25_72b_seed3": "Qwen/Qwen2.5-72B",
+    # Sampled on profiles whose education, income and party are *given* rather
+    # than left to the model.  Asked to invent them, these models produce an
+    # affluent, educated, Democratic United States: 0.8% of respondents under
+    # $30,000 against a real 13.5%, 3.5% without a high-school diploma against
+    # 9%, and 13% Republican against 29%.  Composition can only be fixed where it
+    # is created, which is at sampling time -- unlike the *size* of a demographic
+    # gap, which the party anchors can correct after the fact.
+    "qwen25_7b_demo": "Qwen/Qwen2.5-7B",
+    "qwen25_72b_demo": "Qwen/Qwen2.5-72B",
+    "v4_flash_demo": "deepseek-ai/DeepSeek-V4-Flash-Base",
 }
 
 #: Human-readable names for report tables and plot legends.
@@ -58,6 +68,9 @@ LABELS = {
     "qwen25_7b_v2": "Qwen2.5-7B (scale stated)",
     "qwen25_72b_v2": "Qwen2.5-72B (scale stated)",
     "v4_flash_v2": "DeepSeek-V4-Flash (scale stated)",
+    "qwen25_7b_demo": "Qwen2.5-7B (quota demographics)",
+    "qwen25_72b_demo": "Qwen2.5-72B (quota demographics)",
+    "v4_flash_demo": "DeepSeek-V4-Flash (quota demographics)",
     "qwen25_7b_seed3": "Qwen2.5-7B (replicate 3)",
     "qwen25_72b_seed3": "Qwen2.5-72B (replicate 3)",
     "qwen25_7b_v3": "Qwen2.5-7B (audited)",
@@ -91,6 +104,7 @@ ENGINE_DEFAULTS = {
     "v4_flash": {"kv_cache_dtype": "fp8_ds_mla"},
     "v4_flash_v2": {"kv_cache_dtype": "fp8_ds_mla"},
     "v4_flash_v3": {"kv_cache_dtype": "fp8_ds_mla"},
+    "v4_flash_demo": {"kv_cache_dtype": "fp8_ds_mla"},
 }
 
 
