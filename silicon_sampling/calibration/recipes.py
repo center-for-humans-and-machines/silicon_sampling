@@ -551,14 +551,37 @@ GLOBAL_SHRINK = 0.375
 
 #: Reliability of the averaged Pfander effect vector, by how many runs it averages.
 #:
-#: Measured directly: the shipped 7B+72B ensemble correlates 0.866 with the
-#: ensemble built from those two models' independent second seeds, over the same
-#: 208 (outcome, condition) pairs.  That correlation *is* the reliability of a
-#: two-run ensemble, and Spearman-Brown extends it to four runs.  Single-run
-#: reliabilities, measured the same way, are 0.870 for Qwen2.5-7B and 0.745 for
-#: Qwen2.5-72B, so roughly 13% and 26% of each model's effect variance is nothing
-#: but which respondents it happened to draw.
-ENSEMBLE_RELIABILITY = {1: 0.808, 2: 0.866, 4: 0.928}
+#: Estimated from variance components rather than assumed.  Over the 208 Pfander
+#: pairs, the three Qwen2.5-7B seeds correlate 0.870 / 0.836 / 0.832 with each
+#: other, so a single 7B run's reliability is 0.846 and 15% of its effect variance
+#: is nothing but which respondents it drew; the two Qwen2.5-72B seeds give 0.745.
+#: Splitting each model's variance into signal and noise on those figures, and
+#: taking the covariance of the two models' *true* vectors from their
+#: cross-correlations, gives the reliability of any mixture.
+#:
+#: **The model checks out against a direct measurement.**  It predicts 0.870 for a
+#: one-run-each ensemble; correlating the shipped 7B+72B ensemble against the one
+#: built from both models' second seeds gives 0.866, a 0.5% disagreement.  It also
+#: recovers a true cross-model correlation of +0.700, against +0.713 estimated
+#: independently by disattenuating the observed cross-correlation.
+#:
+#: Keys are total run counts, for balanced or near-balanced mixtures:
+#:
+#: ====  =========  ===========  =================
+#: runs  split      reliability  r gain over 1 + 1
+#: ====  =========  ===========  =================
+#: 2     1 + 1      0.870        --
+#: 3     1 + 2      0.905        +2.0%
+#: 4     2 + 2      0.931        +3.4%
+#: 5     3 + 2      0.940        +3.9%
+#: 6     3 + 3      0.953        +4.6%
+#: ====  =========  ===========  =================
+#:
+#: The split matters a little and the count is what :func:`shrink_for_runs` has:
+#: 2 + 1 gives 0.894 where 1 + 2 gives 0.905, because Qwen2.5-72B is the noisier
+#: of the two and benefits more from a second draw.  The table takes the balanced
+#: reading, which is what the submission actually uses.
+ENSEMBLE_RELIABILITY = {1: 0.808, 2: 0.870, 3: 0.905, 4: 0.931, 5: 0.940, 6: 0.953}
 
 #: How many runs :data:`GLOBAL_SHRINK` was fitted against.
 SHRINK_FITTED_AT_RUNS = 2

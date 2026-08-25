@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
-# Keep one study's run alive until it reaches its target, one short job at a time.
+# Keep one study's run alive until it reaches its target, resubmitting if a job
+# dies before finishing.
 #
-# DAIS schedules a 4-GPU job in minutes and a whole-node job in hours, so the
-# fastest route to a finished run is a sequence of short jobs rather than one long
-# one. That only works because the sampler resumes: answers.jsonl says what is
-# done, and resubmitting the identical job asks for the rest.
+# **A safety net, not a plan.** An earlier version of this header claimed that a
+# sequence of short jobs was the fastest route to a finished run, and the
+# submission JSONs were written with 3 h limits to match. That is wrong and it
+# cost real time: per the cluster-queue guidance the primary driver of DAIS queue
+# wait is the number of GPUs requested, not the time limit, so a short limit does
+# not buy a cheaper slot -- it just splits one job into several, each paying a full
+# queue wait and a model load. Size the job for the work it has to do, with about
+# 50% headroom, and let this script cover only the case where it dies anyway.
+#
+# It works because the sampler resumes: answers.jsonl says what is done, and
+# resubmitting the identical job asks for the rest.
 #
 # Usage: scripts/dais_auto_resume.sh <run_group> <answers_path> <target> <submit_json>
 #

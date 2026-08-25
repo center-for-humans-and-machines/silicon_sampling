@@ -5,11 +5,30 @@ until the target count is reached and then builds the analysis CSVs on the
 cluster, so the pull-down is tens of MB rather than the whole transcript tree.
 
 **Resuming is resubmitting the identical job.** `answers.jsonl` is the source of
-truth for what is finished; the wrapper asks only for the rest. A job killed at
-its wall-time limit loses at most the group in flight — a couple of minutes of
-work — plus one model load. So the wall-time limit is deliberately set near the
-estimate rather than at the 24 h maximum: on DAIS the queue wait dominates, and a
-long limit is scheduled behind everything shorter.
+truth for what is finished; the wrapper asks only for the rest. That makes an
+unexpected death cheap — at most the group in flight plus one model load.
+
+**It is not a licence to set short wall-time limits, and an earlier version of
+this file said otherwise.** It argued that because resuming is cheap and the
+queue wait dominates, the limit should sit near the estimate so the job is
+scheduled ahead of longer ones. That inverts
+[the cluster-queue guidance](../.claude/skills/handling_cluster_queues/SKILL.md):
+the **primary** driver of DAIS queue time is the number of GPUs requested, and
+the time limit is only secondary. Setting a 3 h limit on a 16 h job does not buy
+a cheaper queue slot — it splits one job into six, each paying its own full queue
+wait and its own model load, which is exactly the "don't split tasks up into
+multiple cluster jobs" anti-pattern.
+
+Measured, when this was live: three runs configured that way sat `PD (Priority)`
+for over an hour together, and DeepSeek-V4-Flash reached 3,810 of 18,000
+respondents in about ten hours of wall clock.
+
+So: **set the limit at the estimated runtime plus roughly 50%**, and combine work
+that shares a model into one job rather than submitting it twice. The two
+Qwen2.5-72B runs go in a single job for that reason — one queue wait instead of
+two. `scripts/dais_auto_resume.sh` stays useful as a safety net for a job that
+dies unexpectedly, but it must not be the mechanism that a run is *expected* to
+need.
 
 Post these to the CC command server from the agent container.
 
