@@ -572,14 +572,55 @@ so the two families combine and the combination inherits the best of each.
 
 ### Still outstanding
 
-1. **Leave-one-study-out selection** across Voelkel / ICPC / Goldwert, once the
-   two new samples land. This is what turns the within-study evidence for
-   within-outcome shrinkage (2 of 3 folds) into something adopted or dropped.
-2. **The cross-study outcome-profile transfer test** — whether an anchor can reach
-   the ρ ≈ 0.7 break-even §2 B1 requires.
-3. Genuine vLLM decode on ICPC and Goldwert was unexercised at build time (the
-   4090 was full); the DAIS runs are the first real test.
-4. The response-shape gap: OVL 0.781 against a human replication's 0.925.
+1. Genuine vLLM decode on ICPC and Goldwert was unexercised at build time (the
+   4090 was full); the DAIS runs were the first real test, and they passed.
+2. The response-shape gap: OVL 0.781 against a human replication's 0.925.
+3. Team metadata for `metadata.json`, which the user fills at the end.
+
+## 8.6 Progress (2026-08-25)
+
+### The fidelity audit, which reset most of the calibration
+
+The ICPC and Goldwert templates printed slider endpoint labels without stating
+the 0-100 range, so models answered on an implicit 0-10 scale. Fixing it cut
+mean control-arm level error from 30.7 to 9.7 pp on Goldwert and 38.8 to 18.3 on
+ICPC, and — because it compressed the *effects* by the same factor — invalidated
+every constant fitted before it. Four further defects were fixed alongside it.
+All four `_v3` re-samples are in (7B locally, 72B and V4-Flash on DAIS).
+
+### Delivered since
+
+- **Leave-one-study-out restored to three folds.** Only ICPC and Goldwert were
+  re-sampled, because only their templates changed; a study with no `_v3`
+  directory was being read as unsampled, which silently cut the fold set to two.
+  `models.resolve_run` now falls back to the pre-audit run.
+- **Shrinkage re-derived, twice.** Refitting on audited samples roughly doubled
+  it; then pairing it correctly with the within-outcome factor moved it again.
+  The two interact — the best global k falls 0.475 to 0.250 as within rises 0.2
+  to 1.0 — and they now ship as a matched pair, (within 0.5, global 0.402).
+- **Within-outcome shrinkage adopted** on out-of-fold evidence: per-study mean r
+  0.398 -> 0.426, pooled 0.446 -> 0.470, RMSE improving at the same time.
+- **The seed replicates are now used.** 13% of 7B's and 26% of 72B's Pfander
+  effect variance is sampling noise; averaging all four runs is worth about
+  +0.015 r by three independent estimates. A third seed of each is sampling now.
+- **The party gap calibrated.** Party offsets come from Qwen2.5-72B, because
+  Pfander elicits party rather than printing it, and the per-outcome profile is
+  blended half-way to anchors built from TISP, CCAM and ICPC. Error against
+  external truth: 19.09 pp with no gap, 9.81 as it shipped, 3.93 now.
+- **The media-loss question answered**: Pfander has no non-textual stimuli at
+  all, Goldwert's seven core-media arms were excluded before any accuracy number
+  existed, and severity does not predict recovery among the rest.
+- **Final report** at `docs/reports/README.md` with five sub-reports.
+
+### Negative results worth keeping
+
+- **Per-moderator offset rescaling does not transfer.** Out-of-fold it takes
+  offset r from 0.165 to 0.078 (V4-Flash) and 0.176 to 0.003 (Qwen), hurting
+  both metrics in nearly every fold. Rescaling multiplies signal that is not
+  there; substituting external values is what works.
+- **Overshooting an anchor is punished as hard as undershooting.** On Goldwert,
+  anchoring party to CCAM's raw 37.9 pp scores worse than submitting no gap at
+  all.
 
 ## 9. Decisions taken (2026-08-23)
 
