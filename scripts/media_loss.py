@@ -61,15 +61,15 @@ def arm_accuracy(study: str, score, paths, run: str) -> pd.DataFrame:
         g = g.dropna(subset=["estimate_h_z", "estimate_l_z"])
         if len(g) < 3:
             continue
-        h, l = g["estimate_h_z"].to_numpy(), g["estimate_l_z"].to_numpy()
+        h, ours = g["estimate_h_z"].to_numpy(), g["estimate_l_z"].to_numpy()
         out.append(
             {
                 "study": study,
                 "condition": str(arm),
                 "n_outcomes": len(g),
-                "dir_pct": float((np.sign(h) == np.sign(l)).mean() * 100),
-                "mae": float(np.abs(h - l).mean()),
-                "r_arm": float(np.corrcoef(h, l)[0, 1]) if np.std(l) > 0 else np.nan,
+                "dir_pct": float((np.sign(h) == np.sign(ours)).mean() * 100),
+                "mae": float(np.abs(h - ours).mean()),
+                "r_arm": float(np.corrcoef(h, ours)[0, 1]) if np.std(ours) > 0 else np.nan,
             }
         )
     return pd.DataFrame(out)
