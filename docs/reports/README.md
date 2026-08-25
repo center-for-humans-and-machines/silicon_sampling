@@ -168,6 +168,31 @@ accuracy number existed, and among the arms that remain, severity does not
 predict recovery in any consistent direction. [Details and the full arm
 listing.](media_loss.md)
 
+## The largest theoretical lever, already captured
+
+More than half the variance the pooled correlation rewards is *between* outcomes
+rather than between arms — 51.7% on Voelkel — so knowing which outcomes move at
+all is worth more than ranking the interventions. An earlier estimate put an
+oracle that predicts only the per-outcome mean effect at r = 0.752 against a
+human replication's 0.514, which made borrowing a profile from another study look
+like the biggest available gain.
+
+It is not available, and it is not needed. The profile is a real, reliable thing
+within a study — split-half reliability 0.726 on Voelkel and 0.872 on Goldwert —
+but the three studies share almost no outcomes, so nothing can be transferred
+item to item. What does transfer is a regularity: **the construct a study's
+interventions target ranks first every time.** Voelkel's partisan animosity is
+first of nine, ICPC's climate belief first of four, Goldwert's conversation first
+of eleven.
+
+Pfänder's interventions target trust in climate scientists, and our models
+already put `trust_multidimensional`, `trust_post` and `distrust_post` at ranks
+**1, 2 and 3 of 13**, with the most distal outcome, `behavior_mean`, last. The
+profile already agrees with the only cross-study regularity we can establish, so
+substituting a borrowed one would risk more than it could gain — consistent with
+the measured break-even, which requires a transferred anchor to reach ρ ≈ 0.7
+before it beats leaving our own profile alone.
+
 ## What we would not claim
 
 - **Three studies is a three-point transfer check, not cross-validation.** No
