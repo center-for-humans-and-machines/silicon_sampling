@@ -89,10 +89,15 @@ from .. import paths as _paths
 from typing import Mapping, Sequence
 
 import numpy as np
-import pandas as pd
 
+from ..lazy import lazy_module
 from . import ccam
 from .codebook import PFANDER, Codebook
+
+#: Imported on first use, so the sampler stays importable in the Muse-Glimmer
+#: vLLM container, which ships no pandas.  Only the analysis functions in this
+#: module touch it.
+pd = lazy_module("pandas")
 
 TABLE_DIR = _paths.resolve("demographics")
 

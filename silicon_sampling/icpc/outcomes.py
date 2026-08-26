@@ -44,7 +44,13 @@ different questions and neither substitutes for the other.
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
+
+from ..lazy import lazy_module
+
+#: Imported on first use, so the sampler stays importable in the
+#: Muse-Glimmer vLLM container, which ships no pandas.  Only the analysis
+#: functions in this module touch it.
+pd = lazy_module("pandas")
 
 #: Outcome -> scale range, in the units :func:`treatment_effects` divides by so
 #: that every effect is expressed in percentage points of its own scale.

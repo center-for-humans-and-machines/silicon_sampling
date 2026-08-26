@@ -56,7 +56,27 @@ MODELS = {
     "qwen25_7b_demo": "Qwen/Qwen2.5-7B",
     "qwen25_72b_demo": "Qwen/Qwen2.5-72B",
     "v4_flash_demo": "deepseek-ai/DeepSeek-V4-Flash-Base",
+    # A fourth model family.  Needs its own container: the default DAIS image
+    # ships vLLM 0.23.0 and transformers 5.12.1, neither of which knows
+    # `muse_glimmer`, and the checkpoint carries no `auto_map` so there is no
+    # trust_remote_code path either.  See MUSE_GLIMMER_CONTAINER.
+    "muse_glimmer_30b": "meta-models/Muse-Glimmer-30B",
 }
+
+#: The only image that can load Muse-Glimmer.  It carries vLLM 0.26.1rc1 and
+#: transformers 5.15.0, which register ``MuseGlimmerForConditionalGeneration`` and
+#: resolve the checkpoint's config.  **It ships no pandas and no scipy**, which is
+#: why every study's sampler imports both lazily — see ``silicon_sampling.lazy``.
+#: ``build-csv`` therefore runs in the default image or locally, never here.
+MUSE_GLIMMER_CONTAINER = (
+    "/dais/fs/scratch/ykeller/containers/apptainer/vllm-openai-muse-glimmer.sif"
+)
+
+#: Models whose checkpoint accepts images.  Recorded so it stays deliberate that
+#: we never send any: every template in this project is text, and media a human saw
+#: is described in prose.  Passing an image would make one model's transcripts
+#: incomparable with the other three on the same respondent.
+MULTIMODAL_CAPABLE = ("muse_glimmer_30b",)
 
 #: Human-readable names for report tables and plot legends.
 LABELS = {
@@ -68,6 +88,7 @@ LABELS = {
     "qwen25_7b_v2": "Qwen2.5-7B (scale stated)",
     "qwen25_72b_v2": "Qwen2.5-72B (scale stated)",
     "v4_flash_v2": "DeepSeek-V4-Flash (scale stated)",
+    "muse_glimmer_30b": "Muse-Glimmer-30B",
     "qwen25_7b_demo": "Qwen2.5-7B (quota demographics)",
     "qwen25_72b_demo": "Qwen2.5-72B (quota demographics)",
     "v4_flash_demo": "DeepSeek-V4-Flash (quota demographics)",

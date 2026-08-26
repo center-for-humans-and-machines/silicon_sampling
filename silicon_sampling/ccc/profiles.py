@@ -16,13 +16,19 @@ sides — see :mod:`~silicon_sampling.ccc.instrument`.
 
 from __future__ import annotations
 
+import csv
 import random
 from dataclasses import dataclass, field
 
-import pandas as pd
+from ..lazy import lazy_module
 
 from . import instrument as inst
 from .paths import RECODED_CSV
+
+#: Imported on first use.  ``read_csv`` below deliberately avoids it, because the
+#: sampling path has to run in the Muse-Glimmer container, which ships no pandas;
+#: ``build`` and ``write_csv`` only ever run locally.
+pd = lazy_module("pandas")
 
 #: Columns the profile carries over from a real respondent.
 SOURCE_COLUMNS = ("Gender", "YOB", "Race", "Education", "ANES_Gen", "Age", "PartyC3")
@@ -198,10 +204,27 @@ def write_csv(profiles: list[Profile], path) -> None:
 
 
 def read_csv(path) -> list[Profile]:
-    frame = pd.read_csv(path, low_memory=False)
+    """Profiles from disk, using the stdlib csv module.
+
+    Deliberately pandas-free: this is the only function in this module the
+    sampler calls, and the sampler has to run in a container without pandas.
+    """
+    with open(path, newline="", encoding="utf-8-sig") as handle:
+        rows = list(csv.DictReader(handle))
     out = []
-    for row in frame.to_dict("records"):
-        profile = Profile(**{k: row[k] for k in FIELDS})
+    for row in rows:
+        profile = Profile(
+            profile_id=row["profile_id"],
+            condition=row["condition"],
+            gender=row["gender"],
+            yob=int(row["yob"]),
+            age=int(row["age"]),
+            age_band=row["age_band"],
+            race=row["race"],
+            education=row["education"],
+            party=row["party"],
+            seed=int(row["seed"]),
+        )
         profile.prefilled = prefilled_answers(profile)
         out.append(profile)
     return out

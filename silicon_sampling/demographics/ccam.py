@@ -54,8 +54,7 @@ from pathlib import Path
 from .. import paths as _paths
 from typing import Iterable, Mapping, Sequence
 
-import pandas as pd
-
+from ..lazy import lazy_module
 from .codebook import (
     PARTY_REFUSED,
     PFANDER,
@@ -65,6 +64,10 @@ from .codebook import (
     INCOME_BRACKETS,
     RACE_FROM_CCAM,
 )
+
+#: Imported on first use, so the sampler stays importable where pandas is
+#: absent.  Only this module's loaders and analysis helpers touch it.
+pd = lazy_module("pandas")
 
 #: Repository root (``.../silicon_sampling``), found by walking up from this file.
 ROOT = Path(__file__).resolve().parents[2]
