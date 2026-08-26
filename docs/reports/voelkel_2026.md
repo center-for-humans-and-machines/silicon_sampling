@@ -87,26 +87,68 @@ narrows the `rmse`, `alpha` and `beta` ranges, which are currently the widest in
 the prediction report precisely because effect magnitudes differ 4.5-fold across
 the three studies we used.
 
-## What it cannot give us
+## A fourth fold: yes, and the materials are unusually good
 
-**A fourth effect-recovery fold**, which is what would most improve the
-cross-validation. That needs our *synthetic* effects on its ten arms, which needs
-the intervention texts, and the questionnaire says on page 18: "The text for all
-conditions are the revised interventions listed in the SI." The SI is not on
-disk — the 62-page manuscript has no supplementary section and never mentions
-"Neckties", and the framing names appear only in results tables.
+The replication package arrived in `data/calibration/SI/Voelkel/`, and it is the
+best-conditioned study materials in this project.
 
-With the SI it becomes a genuine fourth fold, and the most Pfänder-like one:
-matched outcomes, matched population, same year, same genre. Without it, the ten
-treatment arms are unusable and only the control arm is.
+**The intervention texts are in a Qualtrics export, not a PDF.** `Materials/CCC -
+Questionnaire - Qualtrics.qsf`. Same study team as the Strengthening Democracy
+Challenge, same Qualtrics conventions — so `silicon_sampling.voelkel.qsf` reads it
+**unmodified**, recovering all thirteen arms from the survey's own display logic
+with names matching the data file's `Condition` column exactly. No crosswalk
+needed.
 
-## Recommendation
+(`Interventions.csv` is not the stimuli — it is the 157-paper literature search
+used to pick the most-cited messages.)
 
-Do (1)–(3) now: they need no inference, they replace judgement calls with
-measurements, and two of them correct numbers already in the submission.
+**No video and no audio in any arm**, which is the decisive difference from
+Goldwert, where seven of seventeen arms were video- or graphic-core and had to be
+dropped:
 
-The fourth fold is worth asking for the SI over. But it needs template
-construction from a PDF rather than a Qualtrics export, plus sampling 13,821
-respondents per model — and the fidelity audit is a standing warning about what a
-hurried template conversion costs, so with the deadline close it is the higher-risk
-half of the opportunity.
+| arm | chars | images | video | audio |
+| --- | --- | --- | --- | --- |
+| Control Neckties / Baseball / Dances | 1,946 / 1,991 / 2,248 | 1 / 1 / 1 | 0 | 0 |
+| Binding | 1,544 | 1 | 0 | 0 |
+| Consensus I / II | 1,892 / 2,316 | 1 / 0 | 0 | 0 |
+| Dire But Solvable | 1,998 | 2 | 0 | 0 |
+| Free Market | 1,743 | 0 | 0 | 0 |
+| Gains | 4,701 | 0 | 0 | 0 |
+| High Social Distance | 1,804 | 2 | 0 | 0 |
+| Purity | 1,828 | 1 | 0 | 0 |
+| **System Preservation** | 2,720 | **12** | 0 | 0 |
+| Warmth | 1,884 | 0 | 0 | 0 |
+
+Every arm carries 1.5k–4.7k characters of prose. Only System Preservation needs a
+real modality audit; the rest have at most two images against a substantial text.
+
+**Also in the package**: `Data/CCC - Data - Recoded.csv` (13,821 rows, same
+convention as the SDC file), the full R analysis scripts, and both questionnaire
+PDFs. `voelkel_etal2026.csv` is the same 13,821 respondents with 49 extra derived
+columns — weights, attrition flags and imputations.
+
+## What is left to do
+
+Not the risky part. What remains is a study package —
+`paths`, `outcomes`, `convert`, `templates`, `profiles`, `run`, `export`, `score`,
+`validate`, `cli` — mirroring the four that exist, plus a modality audit and a
+stub-check pass before sampling. The QSF parser and the outcome composites are
+already available.
+
+One structural difference to handle: **CCC measures every primary outcome before
+*and* after the message**, where the SDC measured only after. A faithful transcript
+has to include the pre-measures, which lengthens it and raises the sampling cost.
+
+Sampling 13,821 respondents costs roughly 9 h on the local 4090 for Qwen2.5-7B,
+5 h on four H200s for Qwen2.5-72B and 13 h for DeepSeek-V4-Flash, plus queue.
+
+## What it would and would not settle
+
+It would make the cross-validation **four folds instead of three**, and add the
+fold that most resembles the target: matched instrument on two outcomes, matched
+population, same year, same genre of intervention.
+
+It is worth being clear that this could make the recipe look **worse**. The
+Goldwert fold is what dropped the fully-fitted variant to 0.325, and a fourth fold
+drawn from a different corner of the space may do the same. The reason to run it is
+to find out, not to improve the number.
