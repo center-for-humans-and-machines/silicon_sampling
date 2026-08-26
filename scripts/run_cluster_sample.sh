@@ -7,7 +7,7 @@
 # and a stray pkill would be aimed at the wrong thing.  So this wrapper only
 # retries; the sampler's own resumability does the rest.
 #
-# Usage: scripts/run_cluster_sample.sh <pfander|voelkel|icpc|goldwert> <run_key> <target_n> [extra sampler args...]
+# Usage: scripts/run_cluster_sample.sh <pfander|voelkel|icpc|goldwert|ccc> <run_key> <target_n> [extra sampler args...]
 #
 # Called from a slurm job as, e.g.:
 #   -c pass; bash scripts/run_cluster_sample.sh pfander v4_flash 18000 \
@@ -41,6 +41,7 @@ case "$STUDY" in
     voelkel)  OUT="$SILICON_SAMPLING_DATA/Voelkel/silicon_sampling/$RUN" ;;
     icpc)     OUT="$SILICON_SAMPLING_DATA/ICPC/silicon_sampling/$RUN" ;;
     goldwert) OUT="$SILICON_SAMPLING_DATA/Goldwert/silicon_sampling/$RUN" ;;
+    ccc)      OUT="$SILICON_SAMPLING_DATA/CCC/silicon_sampling/$RUN" ;;
     *) echo "unknown study: $STUDY" >&2; exit 2 ;;
 esac
 LOG="$OUT/sample.log"
