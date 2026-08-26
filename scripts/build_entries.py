@@ -44,6 +44,7 @@ import argparse
 from pathlib import Path
 
 
+from silicon_sampling.anchors import ccc as ccc_anchors
 from silicon_sampling.anchors import levels as anchor_levels
 from silicon_sampling.calibration import recipes as R
 from silicon_sampling.calibration import tier1 as T1
@@ -96,6 +97,18 @@ def main() -> int:
 
     design = T1.pfander_instrument()
     anchors = anchor_levels.levels(min_grade=args.anchor_grade)
+    # Voelkel et al. 2026 covers six climate outcomes the TISP/CCAM crosswalk does
+    # not, two of them on verbatim identical items, so it extends the anchored set
+    # from three of thirteen to nine.  The two sources do not overlap, so this is a
+    # union rather than a precedence decision.
+    ccc_levels = ccc_anchors.levels()
+    overlap = set(anchors) & set(ccc_levels)
+    if overlap:  # pragma: no cover - a guard; today the two sources are disjoint
+        raise SystemExit(
+            f"anchor sources disagree about {sorted(overlap)}; decide precedence "
+            "explicitly rather than letting dict.update pick"
+        )
+    anchors.update(ccc_levels)
     print(f"level anchors at grade '{args.anchor_grade}': {len(anchors)} outcomes")
     for outcome, value in anchors.items():
         print(f"    {outcome:24s} {value:7.2f}")

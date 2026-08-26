@@ -471,16 +471,35 @@ GROUNDED = "v4_flash"
 #: Qwen2.5-7B goes from r -0.306 to +0.559, V4-Flash from +0.487 to +0.838.
 PARTY_DONOR = "qwen25_72b_demo"
 
-#: Human within-arm dispersion on Pfander's own outcomes, from TISP.
+#: Human within-arm dispersion on Pfander's own outcomes.
 #:
-#: Standard deviations in points of the 0-100 scale, over TISP's US sample, for
-#: the items the crosswalk grades ``near`` -- the same questions Pfander asks, so
-#: this is the closest thing to Pfander's own human dispersion that exists.
-#: ``policy_specific_mean`` is excluded: its TISP mapping is ``construct-only``.
+#: Standard deviations in points of the 0-100 scale, from two sources:
+#:
+#: * **TISP**, for the three outcomes its crosswalk grades ``near`` -- the same
+#:   questions Pfander asks, on a different survey.
+#: * **Voelkel et al. 2026 (CCC)**, for six climate outcomes, measured on its
+#:   pooled placebo-control arm of 3,183.  Two of those six are *verbatim
+#:   identical* items on the same scale, which is a closer match than anything
+#:   else in this project.
+#:
+#: Adding CCC is what took the residual scale off an extrapolation from three of
+#: thirteen outcomes and onto nine of thirteen.  See ``anchors/ccc.py`` for the
+#: grade of each match, and for the leakage rule: the CCC-derived six are switched
+#: off when CCC is the held-out study in cross-validation.
 HUMAN_DISPERSION = {
+    # TISP, ``near`` grade.
     "trust_multidimensional": 20.62,
     "trust_post": 27.99,
     "policy_role_mean": 26.02,
+    # CCC control arm.
+    "concern_mean": 31.65,
+    "policy_general": 29.32,
+    "behavior_mean": 24.26,
+    "belief_post": 22.52,
+    "policy_specific_mean": 23.98,
+    # donation_ams is deliberately absent: CCC's donation is cents allocated out
+    # of 100 and Pfander's is an amount on 0-10, so its mean and sd do not
+    # transfer.  Its *party gap* does, being in pp of each scale's own range.
 }
 
 #: Multiplier on the residual term; see ``Recipe.residual_scale``.
@@ -517,9 +536,16 @@ HUMAN_DISPERSION = {
 #: **1.12** **1.011**      **0.057**
 #: =======  =============  ==========
 #:
-#: A single global factor cannot fit three outcomes exactly -- at 1.12 they sit at
-#: 1.098, 1.004 and 0.931 -- and per-outcome factors are not worth three
-#: parameters fitted on three anchors.
+#: A single global factor cannot fit every outcome exactly, and per-outcome factors
+#: are not worth one parameter per anchor.
+#:
+#: **It was fitted on three anchors and then validated on eight.**  Adding Voelkel
+#: et al. 2026 extended the dispersion anchors from the three TISP outcomes to
+#: eight, and 1.12 held: mean sd ratio 1.021 across the eight, and the
+#: L1-optimal factor over them comes out at 1.124.  The residual heterogeneity is
+#: real and no scalar removes it -- belief_post sits at 1.242 and concern_mean at
+#: 0.866 -- but the factor itself did not move when the evidence base nearly
+#: tripled, which is the strongest thing that could have been said about it.
 #:
 #: Like every other scale factor here it cannot move the sort key.  It reaches the
 #: variance ratio, OVL, KS and W1.
@@ -555,15 +581,38 @@ RESIDUAL_SCALE = 1.12
 #: Two of the three sources contrast **ideology** rather than party, which is why
 #: these are blended toward rather than substituted for; see
 #: :data:`PARTY_GAP_WEIGHT`.
+#: **Six of the nine were replaced by direct measurements on Voelkel et al. 2026.**
+#: The earlier climate values were CCAM construct-only items shrunk by a judgement
+#: factor of 0.6, or ICPC's *ideology* split standing in for party.  CCC measures
+#: party directly, in a contemporaneous US online experimental sample, on items
+#: Pfander took from it -- two verbatim identical.  The corrections were large and
+#: ran both ways:
+#:
+#: ====================  ====  ====  ==================
+#: outcome               was   now   grade of the match
+#: ====================  ====  ====  ==================
+#: concern_mean          26.7  37.7  identical
+#: policy_general        26.7  32.9  identical
+#: behavior_mean         10.0  16.2  partial, 3 of 6 items
+#: policy_specific_mean  13.7  25.3  construct-only
+#: belief_post           31.7  22.8  construct-only
+#: donation_ams          --    12.4  construct-only
+#: ====================  ====  ====  ==================
+#:
+#: The three trust outcomes keep their TISP values; CCC does not measure them.
+#: Leakage rule as for :data:`HUMAN_DISPERSION`.
 PARTY_GAP_ANCHORS = {
+    # TISP, ``near`` grade: the same Besley battery Pfander scores.
     "trust_multidimensional": 4.0,
     "trust_post": 11.3,
     "policy_role_mean": 7.4,
-    "policy_specific_mean": 13.7,
-    "belief_post": 31.7,
-    "concern_mean": 26.7,
-    "policy_general": 26.7,
-    "behavior_mean": 10.0,
+    # CCC, party measured directly; grades in anchors/ccc.py.
+    "concern_mean": 37.7,
+    "policy_general": 32.9,
+    "behavior_mean": 16.2,
+    "policy_specific_mean": 25.3,
+    "belief_post": 22.8,
+    "donation_ams": 12.4,
 }
 
 #: How far to move party offsets toward :data:`PARTY_GAP_ANCHORS`.

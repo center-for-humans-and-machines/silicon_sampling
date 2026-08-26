@@ -242,3 +242,46 @@ def test_residual_scaling_touches_only_the_within_cell_spread():
     assert R.hybrid_default().residual_scale == pytest.approx(R.RESIDUAL_SCALE)
     # The uncalibrated baseline must stay untouched, or it stops being a baseline.
     assert R.uncalibrated("qwen25_7b").residual_scale == pytest.approx(1.0)
+
+
+def test_the_ccc_anchors_still_match_their_source_data():
+    """The frozen anchor numbers must equal what the source file actually says.
+
+    ``anchors/ccc.py`` stores measurements rather than computing them on import, so
+    a submission is reproducible from the repository alone.  The cost is that the
+    file and the data can drift apart silently; this is what makes that a test
+    failure instead.
+    """
+    from silicon_sampling.anchors import ccc as A
+
+    measured = A.measure().set_index("pfander_outcome")
+    for anchor in A.ANCHORS:
+        row = measured.loc[anchor.pfander_outcome]
+        assert anchor.level == pytest.approx(row["level"], abs=0.05)
+        assert anchor.sd == pytest.approx(row["sd"], abs=0.05)
+        assert anchor.party_gap == pytest.approx(row["party_gap"], abs=0.1)
+
+
+def test_the_recipe_constants_agree_with_the_anchor_module():
+    """One number, one home.  A hand-edited constant that drifts is a silent bug."""
+    from silicon_sampling.anchors import ccc as A
+
+    for outcome, gap in A.party_gaps().items():
+        assert R.PARTY_GAP_ANCHORS[outcome] == pytest.approx(gap, abs=0.06)
+    for outcome, sd in A.dispersion().items():
+        assert R.HUMAN_DISPERSION[outcome] == pytest.approx(sd, abs=0.02)
+
+
+def test_ccc_anchors_switch_off_when_ccc_is_held_out():
+    """Cross-validation must not score a fold against its own human data.
+
+    Six party-gap and six dispersion anchors are measured on CCC.  When CCC is the
+    held-out study those have to go, or the fold is partly graded against numbers
+    taken from the very sample it is meant to predict.
+    """
+    from silicon_sampling.anchors import ccc as A
+
+    assert A.for_study("CCC") == ()
+    assert A.levels(A.for_study("CCC")) == {}
+    assert A.party_gaps(A.for_study("CCC")) == {}
+    assert A.levels(A.for_study("Goldwert"))
