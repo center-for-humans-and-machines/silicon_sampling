@@ -198,8 +198,9 @@ def fit_on_training(train: list[dict]) -> dict:
     pooled = pd.concat(
         [effect_vector(d, membership, within) for d in train], ignore_index=True
     )
-    h, l = pooled["estimate_h"].to_numpy(), pooled["estimate_l"].to_numpy()
-    kappa = float(np.cov(h, l, ddof=1)[0, 1] / np.var(l, ddof=1))
+    human = pooled["estimate_h"].to_numpy()
+    ours = pooled["estimate_l"].to_numpy()
+    kappa = float(np.cov(human, ours, ddof=1)[0, 1] / np.var(ours, ddof=1))
 
     donor_best = None
     for donor in RUNS:
@@ -295,7 +296,7 @@ def main() -> int:
             srow = {
                 "held out": held,
                 **section1(single),
-                "what": f"single: {run.replace('_v3','')}, uncalibrated",
+                "what": f"single: {run.replace('_v3', '')}, uncalibrated",
             }
             rows.append(srow)
 
