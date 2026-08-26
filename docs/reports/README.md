@@ -159,11 +159,21 @@ demographic offsets are separate terms of the decomposition, so this cannot move
 the sort key.
 
 The obvious competing explanation is wrong, and worth recording. The models are
-far spikier than humans on round numbers — Qwen2.5-72B puts **78%** of 0–100
-slider answers on a multiple of ten against a human **34%**. But OVL is a
+spikier than humans on round numbers — **on Goldwert**, Qwen2.5-72B puts 78% of
+0–100 slider answers on a multiple of ten against a human 34%. But OVL is a
 kernel-density overlap and W1 and KS are ECDF-based, so jittering answers off the
 spikes moved OVL by 0.000 in eleven of twelve cells. A real and visible artefact
 that none of the scored metrics can see.
+
+Two things about that figure, because it is easy to over-read. It is **Goldwert's,
+not Pfänder's**: on Pfänder the same model sits at 29.4%, and Pfänder publishes no
+human data to compare it against. And **stating the slider range does not fix
+it** — Goldwert's templates state the range after the audit and still spike at
+55.8% for Qwen2.5-7B against a human 33.2%. The range fix repaired *levels*, by 21
+points on Goldwert; digit preference is a separate habit and survives it. Excess
+round-number preference over human, like-for-like on single-item sliders, is
++22.6 pp on Goldwert and +5.1 pp on CCC for the same model, and nothing here
+explains why.
 
 ### 7. Letting the model invent its demographics is a mistake
 

@@ -22,6 +22,28 @@ So the template must print the range, and we know the exact form the human saw.
 Note that Parts E/F/J/K account for only 36 of the 48; the other **12 are the Part L
 manipulation checks**, which are sliders too and easy to miss.
 
+## Digit preference: better here, and not because of the range
+
+For the record, since it is easy to attribute to the wrong cause. Excess
+round-number preference over the human reference, Qwen2.5-7B, like-for-like on
+single-item 0-100 sliders:
+
+| study | ours | human | excess |
+| --- | --- | --- | --- |
+| CCC | 35.1% | 30.0% | **+5.1 pp** |
+| Goldwert (range stated) | 55.8% | 33.2% | **+22.6 pp** |
+
+CCC is much closer to human, but **not because it states the range**. Goldwert
+states the range too, since the audit, and still carries a 22.6 pp excess — the
+range fix repaired *levels*, by 21 points, and left digit preference alone.
+Pfänder, which also states its range, sits at 29.4% with no human data to compare
+against.
+
+So the CCC difference is real and unexplained. One untested hypothesis: CCC asks
+every battery twice, so a model answering the post-treatment version has its own
+pre-treatment numbers in context and may adjust from those rather than reaching
+for a round one. Goldwert and Pfänder ask once.
+
 ## Six traps that would have corrupted results silently
 
 **1. Twelve columns are sign-flipped in the released data.** `Step 2 -
