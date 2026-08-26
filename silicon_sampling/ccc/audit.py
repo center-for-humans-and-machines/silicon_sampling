@@ -18,15 +18,39 @@ REASONS = {
     "Consensus Framing 2": "pure text, single page",
     "Gains Framing": "no images; the longest stimulus at 4,693 characters",
     "Free Market Framing": "no images; loses only the pacing of 11 one-sentence pages",
-    "Control Neckties": "one image, URL live, fetched and verified a decorative photo with no prose reference",
+    "Control Neckties": (
+        "one image, URL live, fetched and verified a decorative photo with no prose "
+        "reference"
+    ),
     "Control Baseball": "one image, URL live, fetched and verified a decorative photo",
     "Control Dances": "one image, URL live, fetched and verified a decorative photo",
-    "Consensus Framing 1": "one dead image between two paragraphs that both state the 97% figure verbatim; high redundancy",
-    "Binding Framing": "one dead 800x182 masthead above the slogan, which is separately present as text; not asserted decorative",
-    "High Social Distance Framing": "two dead images; the 800x65 strip under a 16:9 photo is probably a caption rendered as an image, so one line of read text is likely lost",
-    "Purity Framing": "image load-bearing but recoverable: the prose points at it deictically and the live image measures a 3.2x saturation collapse across halves, matching the clear/hazy pair the text claims",
-    "Warmth Framing": "no images, but the arm's active ingredient is a writing task (median dwell 130.8 s against 17.0 s on page 1); kept as a free-text slot, and its human answer was never released",
-    "Dire But Solvable Framing": "unresolved: two image-only questions at the tops of pages 3 and 4, no captions, no prose reference, absent from the SI, URLs dead, yet humans dwelled 20.8 s and 15.0 s on them",
+    "Consensus Framing 1": (
+        "one dead image between two paragraphs that both state the 97% figure "
+        "verbatim; high redundancy"
+    ),
+    "Binding Framing": (
+        "one dead 800x182 masthead above the slogan, which is separately present as "
+        "text; not asserted decorative"
+    ),
+    "High Social Distance Framing": (
+        "two dead images; the 800x65 strip under a 16:9 photo is probably a caption "
+        "rendered as an image, so one line of read text is likely lost"
+    ),
+    "Purity Framing": (
+        "image load-bearing but recoverable: the prose points at it deictically, "
+        "and the live image measures a 3.2x saturation collapse across halves, "
+        "matching the clear/hazy pair the text claims"
+    ),
+    "Warmth Framing": (
+        "no images, but the arm's active ingredient is a writing task (median dwell "
+        "130.8 s against 17.0 s on page 1); kept as a free-text slot, and its human "
+        "answer was never released"
+    ),
+    "Dire But Solvable Framing": (
+        "unresolved: two image-only questions at the tops of pages 3 and 4, no "
+        "captions, no prose reference, absent from the SI, URLs dead, yet humans "
+        "dwelled 20.8 s and 15.0 s on them"
+    ),
 }
 
 
