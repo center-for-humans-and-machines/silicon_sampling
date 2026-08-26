@@ -12,15 +12,15 @@ range. Target column says which direction is good.
 
 | metric | target | **prediction** | range | human replication, for scale |
 | --- | --- | --- | --- | --- |
-| `pearson_r` (leaderboard sort key) | high | **0.44** | 0.30 – 0.55 | 0.599 |
-| `spearman_rho` | high | **0.43** | 0.28 – 0.55 | 0.520 |
+| `pearson_r` (leaderboard sort key) | high | **0.41** | 0.28 – 0.52 | 0.599 |
+| `spearman_rho` | high | **0.40** | 0.26 – 0.52 | 0.520 |
 | `directional_pct` | high | **71** | 62 – 79 | 82.7 |
 | `pearson_within` | high | **0.37** | 0.24 – 0.46 | 0.354 |
-| `pearson_adj` | high | **0.70** | 0.48 – 0.85 | 0.872 |
+| `pearson_adj` | high | **0.64** | 0.44 – 0.82 | 0.872 |
 | `rmse` | low | **2.9** | 1.5 – 4.5 | 2.956 |
 | `rmse_adj` | low | **2.0** | 0.8 – 3.4 | 2.081 |
-| `alpha` | 0 | **1.2** | 0.0 – 2.4 | 0.664 |
-| `beta` | 1 | **0.95** | 0.55 – 1.40 | 0.514 |
+| `alpha` | 0 | **1.4** | 0.0 – 2.5 | 0.664 |
+| `beta` | 1 | **0.85** | 0.50 – 1.35 | 0.514 |
 
 ### Section 2 — subgroup (condition × moderator) effects
 
@@ -60,12 +60,43 @@ estimated. The other ten carry the cross-validated error.
 
 ## How each number was obtained
 
-**Section 1** comes directly from the nested cross-validation's fold means for
-the shipped design, with one adjustment: the reference studies have one run per
-model where the submission averages eight, raising measured ensemble reliability
-from 0.870 to 0.964. Effect-recovery correlations scale as the square root of
-reliability, so `pearson_r`, `spearman_rho`, `pearson_within` and `pearson_adj`
-are multiplied by **√(0.964/0.870) = 1.053**. Nothing else is adjusted.
+**Section 1** comes from the nested cross-validation, but **not** from its
+best-looking row, and getting this right required revising the prediction down.
+
+The tempting basis is the variant with membership and the within factor fixed,
+which scores mean held-out r of 0.426. That is not admissible as an out-of-sample
+number for Pfänder: `within = 0.5` was chosen by measuring on Voelkel, and both
+"average the two Qwens" and "exclude V4-Flash" were decided by looking at all
+three reference studies. Those choices are pre-committed relative to the *folds*
+but not relative to *the data as a whole*, which is the thing that matters when
+the target is a fourth study.
+
+Decomposing which informed choice was load-bearing:
+
+| variant | mean held-out r |
+| --- | --- |
+| both membership and within fitted per fold | **0.325** |
+| membership fixed by prior, within fitted | **0.385** |
+| membership fitted, within fixed at 0.5 | 0.390 |
+| both fixed | 0.426 |
+| *single Qwen2.5-7B, no calibration* | *0.349* |
+
+The two recover about +0.06 each and are roughly additive, so 0.426 is two
+data-informed choices rather than one prior plus one fitted parameter.
+
+The basis used here is the **middle row, 0.385**, on the reading that the *form*
+of each choice is a genuine prior while its *specifics* are not: averaging two
+comparable estimators is standard variance reduction, and shrinking toward a group
+mean is standard empirical Bayes, but which two models and what factor both needed
+data. That grants the forms and charges the magnitudes.
+
+One adjustment is then applied, and it is not leakage: the reference studies have
+one run per model where the submission averages eight, raising measured ensemble
+reliability from 0.870 to 0.964. That was measured on Pfänder's own seed
+replicates with no reference to the three studies. Correlations scale as the
+square root of reliability, so `pearson_r`, `spearman_rho`, `pearson_within` and
+`pearson_adj` are multiplied by **√(0.964/0.870) = 1.053**, giving 0.406, 0.396,
+0.369 and 0.640. `rmse`, `alpha` and `beta` are carried across unadjusted.
 
 `rmse`, `alpha` and `beta` are carried across unadjusted. All three depend on the
 size and the mean of the study's true effects, which for Pfänder is unknown — the
@@ -104,13 +135,19 @@ from the same population as the three reference studies — it is a different to
 different arm count, and a different year. If Pfänder is more like Voelkel the
 result lands near the top of the range; if more like ICPC, the bottom.
 
-**The selection question puts a floor under the prediction, not a ceiling.** A
-fully automated version of this recipe, refitting every choice per fold, scores
-0.325 rather than 0.426 — so if the pre-committed structure turns out not to
-transfer, `pearson_r` lands near **0.34** instead of 0.44. The reason for
-centring on the higher number is that within 0.3, 0.5 and 1.0 all score
-0.398–0.428, so the design is insensitive to the choice inside a wide band; what
-was harmful in cross-validation was fitting it sharply, not choosing it roughly.
+**The selection question sets the floor, and it is a real floor.** If none of the
+design transfers — if the right simulation of "fit on three studies, apply to a
+fourth" is the fully automated one — `pearson_r` lands near **0.34** rather than
+0.41. Every variant still beats an uncalibrated single model (0.325 and 0.385
+against 0.349 and 0.329), so the calibration is not expected to *hurt*; but the
+margin over simply submitting Qwen2.5-7B is much thinner than the 0.426 figure
+suggested, and on the pessimistic reading it disappears.
+
+The one thing that argues against the floor is that the design is insensitive
+inside a wide band: within 0.3, 0.5 and 1.0 score 0.428, 0.426 and 0.398 when
+held fixed. What damaged the automated variant was fitting the factor *sharply*
+per fold — on the Goldwert fold it chose a single model at within 0.20 and scored
+0.159 — not choosing it roughly.
 
 **Three metrics rest on an extrapolation from three of thirteen outcomes.** The
 level anchors, the dispersion target and hence the residual scale are all fitted

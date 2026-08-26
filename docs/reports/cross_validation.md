@@ -114,9 +114,12 @@ Two numbers bracket the effect side, and neither alone is the answer:
 * **0.325** is what a fully automated version of this recipe achieves when every
   choice is refitted per fold. It is pessimistic as a prediction for the shipped
   entry, because the shipped entry does not refit those choices.
-* **0.426** is what the shipped structure achieves out-of-sample. It is optimistic,
-  because although membership and the within factor are not fitted *per fold*,
-  they were originally motivated by these same three studies.
+* **0.426** is what the shipped structure achieves with those two choices held
+  fixed. It is **not** an out-of-sample number for a fourth study, because both
+  were motivated by these same three studies. It belongs in this table as an upper
+  bound, not as the estimate.
+* **0.385** is the defensible middle: the membership prior granted, the within
+  factor charged as fitted. This is what the Pfänder prediction is built on.
 
 The gap between them is mostly closed by one observation: within 0.3, 0.5 and 1.0
 score 0.428, 0.426 and 0.398, so the design is insensitive to the choice inside a
