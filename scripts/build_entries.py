@@ -75,7 +75,7 @@ def entries(anchors: dict[str, float]) -> list[tuple[str, R.Recipe]]:
             R.Recipe(
                 name="combined",
                 effects_from=best,
-                shrink=R.shrink_for_runs(len(best)),
+                shrink=R.shrink_for_runs(best),
                 **common,
             ),
         ),

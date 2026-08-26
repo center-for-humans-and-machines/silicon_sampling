@@ -45,6 +45,7 @@ import pandas as pd
 
 from ..pfander import outcomes as pfander_outcomes
 from ..pfander import paths as _pfander_paths
+from .. import models as MODELS
 from . import components as C
 from . import effects as E
 from . import offsets as OFF
@@ -291,16 +292,31 @@ def averaged_effects(
     *lowers* pooled r to 0.440, because it is the weakest ranker (0.190 alone) —
     though it lowers RMSE further, which is the one place the three-way average
     wins outright.  So the membership is a decision, not a default.
+
+    **Runs are averaged within a model first, then across models**, so each model
+    carries the same weight however many seeds of it happen to exist.  Weighting
+    every run equally instead would quietly hand Qwen2.5-7B four sevenths of the
+    vector as soon as it has one more replicate than Qwen2.5-72B, and the result
+    that was actually validated is the balanced one — an equal blend of the two.
+    Runs of the same model are recognised by sharing a Hugging Face id, which is
+    what makes a seed replicate a replicate rather than a third opinion.
     """
-    tables = [effect_table(runs[name], design) for name in recipe.effect_runs]
-    if len(tables) == 1:
-        return tables[0]
-    stacked = pd.concat(tables, ignore_index=True)
-    return (
-        stacked.groupby(["outcome", "condition"], as_index=False)
-        .agg(estimate=("estimate", "mean"), se=("se", lambda s: float(s.mean())))
-        .reset_index(drop=True)
-    )
+    by_model: dict[str, list[pd.DataFrame]] = {}
+    for name in recipe.effect_runs:
+        key = MODELS.MODELS.get(name, name)
+        by_model.setdefault(key, []).append(effect_table(runs[name], design))
+
+    def mean_of(tables: list[pd.DataFrame]) -> pd.DataFrame:
+        if len(tables) == 1:
+            return tables[0]
+        return (
+            pd.concat(tables, ignore_index=True)
+            .groupby(["outcome", "condition"], as_index=False)
+            .agg(estimate=("estimate", "mean"), se=("se", lambda s: float(s.mean())))
+            .reset_index(drop=True)
+        )
+
+    return mean_of([mean_of(tables) for tables in by_model.values()])
 
 
 def apply(
@@ -418,9 +434,22 @@ def apply(
 
 
 #: The effect ensemble that scored best on the leaderboard's sort key.
+#: The first entry supplies the rows, so it decides who the synthetic respondents
+#: are.  It is the quota-demographics run, because a model left to invent its own
+#: income and party produces 0.8% of respondents under $30,000 against a real
+#: 13.5%, and 18 of them in the control arm against the benchmark's minimum group
+#: size of 30 -- for the level that every income interaction is dummy-coded
+#: against.  The quota run puts 264 there.
+#:
+#: Swapping the template costs nothing on the effects: over the 208 pairs the
+#: quota run correlates 0.864 with the three elicited seeds, where those seeds
+#: correlate 0.846 with each other, so it sits inside the seed-noise band rather
+#: than outside it.  Control-arm levels move by half a point.
 BEST_RANKERS = (
+    "qwen25_7b_demo",
     "qwen25_7b",
     "qwen25_7b_seed2",
+    "qwen25_7b_seed3",
     "qwen25_72b",
     "qwen25_72b_seed2",
 )
@@ -549,45 +578,75 @@ WITHIN_SHRINK = 0.5
 #: slice of RMSE and all of beta, and provably nothing on the sort key.
 GLOBAL_SHRINK = 0.375
 
-#: Reliability of the averaged Pfander effect vector, by how many runs it averages.
+#: Signal and noise variance of one run's Pfander effect vector, per model.
 #:
-#: Estimated from variance components rather than assumed.  Over the 208 Pfander
-#: pairs, the three Qwen2.5-7B seeds correlate 0.870 / 0.836 / 0.832 with each
-#: other, so a single 7B run's reliability is 0.846 and 15% of its effect variance
-#: is nothing but which respondents it drew; the two Qwen2.5-72B seeds give 0.745.
-#: Splitting each model's variance into signal and noise on those figures, and
-#: taking the covariance of the two models' *true* vectors from their
-#: cross-correlations, gives the reliability of any mixture.
-#:
-#: **The model checks out against a direct measurement.**  It predicts 0.870 for a
-#: one-run-each ensemble; correlating the shipped 7B+72B ensemble against the one
-#: built from both models' second seeds gives 0.866, a 0.5% disagreement.  It also
-#: recovers a true cross-model correlation of +0.700, against +0.713 estimated
-#: independently by disattenuating the observed cross-correlation.
-#:
-#: Keys are total run counts, for balanced or near-balanced mixtures:
-#:
-#: ====  =========  ===========  =================
-#: runs  split      reliability  r gain over 1 + 1
-#: ====  =========  ===========  =================
-#: 2     1 + 1      0.870        --
-#: 3     1 + 2      0.905        +2.0%
-#: 4     2 + 2      0.931        +3.4%
-#: 5     3 + 2      0.940        +3.9%
-#: 6     3 + 3      0.953        +4.6%
-#: ====  =========  ===========  =================
-#:
-#: The split matters a little and the count is what :func:`shrink_for_runs` has:
-#: 2 + 1 gives 0.894 where 1 + 2 gives 0.905, because Qwen2.5-72B is the noisier
-#: of the two and benefits more from a second draw.  The table takes the balanced
-#: reading, which is what the submission actually uses.
-ENSEMBLE_RELIABILITY = {1: 0.808, 2: 0.870, 3: 0.905, 4: 0.931, 5: 0.940, 6: 0.953}
+#: Measured over the 208 pairs.  The three Qwen2.5-7B seeds correlate 0.870 /
+#: 0.836 / 0.832 with each other, so a single 7B run's reliability is 0.846 and
+#: 15% of its effect variance is nothing but which respondents it drew; the
+#: Qwen2.5-72B seeds give 0.745.  Splitting each model's total variance on those
+#: reliabilities gives the components below.
+EFFECT_VARIANCE = {
+    "Qwen/Qwen2.5-7B": {"signal": 5.859, "noise": 1.069},
+    "Qwen/Qwen2.5-72B": {"signal": 4.528, "noise": 1.550},
+}
 
-#: How many runs :data:`GLOBAL_SHRINK` was fitted against.
-SHRINK_FITTED_AT_RUNS = 2
+#: Covariance of two models' *true* effect vectors, keyed by the unordered pair.
+#: 3.606 corresponds to a true cross-model correlation of +0.700 -- against +0.713
+#: obtained independently by disattenuating the observed cross-correlation.
+EFFECT_COVARIANCE = {
+    frozenset({"Qwen/Qwen2.5-7B", "Qwen/Qwen2.5-72B"}): 3.606,
+}
 
 
-def shrink_for_runs(n_runs: int, base: float | None = None) -> float | None:
+def ensemble_reliability(runs: tuple[str, ...]) -> float | None:
+    """How much of the averaged effect vector is signal rather than sampling noise.
+
+    Computed from variance components rather than looked up, because the answer
+    depends on *how* the runs divide between models and not merely how many there
+    are: four 7B seeds with two 72B seeds is not the same ensemble as three of
+    each.  Averaging is model-balanced (see :func:`averaged_effects`), so each of
+    the ``M`` models carries weight ``1/M``; its signal survives that averaging
+    and its noise is divided by however many seeds of it there are.
+
+    **The model checks out against a direct measurement.**  It predicts 0.870 for
+    a one-run-each ensemble; correlating the shipped 7B+72B ensemble against the
+    one built from both models' second seeds gives 0.866, a 0.5% disagreement.
+
+    Returns ``None`` when any run's model has no measured components, since a
+    guessed reliability would silently rescale the shrinkage.
+    """
+    counts: dict[str, int] = {}
+    for run in runs:
+        counts[MODELS.MODELS.get(run, run)] = (
+            counts.get(MODELS.MODELS.get(run, run), 0) + 1
+        )
+    if not counts or any(model not in EFFECT_VARIANCE for model in counts):
+        return None
+    weight = 1.0 / len(counts)
+    signal = 0.0
+    for a in counts:
+        for b in counts:
+            if a == b:
+                signal += weight * weight * EFFECT_VARIANCE[a]["signal"]
+            else:
+                signal += (
+                    weight * weight * EFFECT_COVARIANCE.get(frozenset({a, b}), 0.0)
+                )
+    noise = sum(
+        weight * weight * EFFECT_VARIANCE[model]["noise"] / n
+        for model, n in counts.items()
+    )
+    return signal / (signal + noise) if signal + noise > 0 else None
+
+
+#: The reliability :data:`GLOBAL_SHRINK` was fitted against: one run per model,
+#: which is all the calibration studies have.
+SHRINK_FITTED_RELIABILITY = 0.870
+
+
+def shrink_for_runs(
+    runs: tuple[str, ...] | int, base: float | None = None
+) -> float | None:
     """:data:`GLOBAL_SHRINK`, adjusted for how noisy an ensemble it is applied to.
 
     The shrinkage factor is ``cov(h, l) / var(l)``.  Averaging more independent
@@ -596,19 +655,22 @@ def shrink_for_runs(n_runs: int, base: float | None = None) -> float | None:
     factor rises in exact proportion to the reliability.
 
     This matters because the factor is fitted on the calibration studies, where
-    only one run per model exists, and then applied to Pfander, where four do.
-    Carrying the two-run factor onto a four-run ensemble would over-shrink by
-    about 7%.  It cannot touch the sort key either way; a positive scalar cannot
+    only one run per model exists, and then applied to Pfander, where several do.
+    Carrying the one-run-each factor onto a six-run ensemble would over-shrink by
+    about 9%.  It cannot touch the sort key either way; a positive scalar cannot
     move a correlation.
+
+    Takes the run names rather than a count, because the reliability depends on
+    how they divide between models.  An ``int`` is accepted and ignored, for
+    callers that only know how many there are.
     """
     base = GLOBAL_SHRINK if base is None else base
-    if base is None:
-        return None
-    here = ENSEMBLE_RELIABILITY.get(n_runs)
-    fitted = ENSEMBLE_RELIABILITY[SHRINK_FITTED_AT_RUNS]
-    if here is None:  # an ensemble size nobody measured; leave the factor alone
+    if base is None or isinstance(runs, int):
         return base
-    return base * here / fitted
+    here = ensemble_reliability(tuple(runs))
+    if here is None:  # a model nobody measured; leave the factor alone
+        return base
+    return base * here / SHRINK_FITTED_RELIABILITY
 
 
 def hybrid_default(

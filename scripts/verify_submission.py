@@ -39,6 +39,15 @@ from silicon_sampling.pfander.scoring import DESIGN
 
 warnings.filterwarnings("ignore")
 
+#: Moderator levels the study's own design allocates nobody to.
+#:
+#: Pfander's Preregistration Table 3 quotas gender as male and female only, and
+#: its four age bands sum to exactly 18,000 across those two columns.  The
+#: questionnaire still offers "Other" as a response option, but no respondent is
+#: assigned to it, so an empty cell there reproduces the design rather than
+#: missing part of it.
+UNALLOCATED = {("gender", "Other")}
+
 #: Columns whose emptiness carries no information about the submission.
 BENIGN = {
     "pearson_within": "undefined for a group with one outcome",
@@ -93,7 +102,20 @@ def main() -> int:
     print("tables produced")
     problems = 0
     for name, table in sorted(frames.items()):
-        empty = {c: int(table[c].isna().sum()) for c in table if table[c].isna().any()}
+        scored = table
+        if {"moderator", "level"} <= set(table.columns):
+            keep = ~table.apply(
+                lambda r: (r["moderator"], r["level"]) in UNALLOCATED, axis=1
+            )
+            dropped = int((~keep).sum())
+            scored = table[keep]
+            if dropped:
+                print(
+                    f"  {'':28s} ({dropped} row(s) for levels the quota allocates nobody to)"
+                )
+        empty = {
+            c: int(scored[c].isna().sum()) for c in scored if scored[c].isna().any()
+        }
         unexplained = {c: n for c, n in empty.items() if c not in BENIGN}
         problems += len(unexplained)
         note = f"  <-- unexplained: {unexplained}" if unexplained else ""
