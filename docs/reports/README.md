@@ -4,7 +4,8 @@ Final report. The submission is three Tier-1 entries in
 `data/pfander/submission/{primary,secondary-1,secondary-2}`, each 18,000
 synthetic respondents × 33 columns, all passing the benchmark's validator.
 
-Sub-reports: [calibration design](calibration_design/README.md) ·
+Sub-reports: [**the recipe, part by part**](the_recipe.md) ·
+[calibration design](calibration_design/README.md) ·
 [level anchors](level_anchors.md) · [media loss](media_loss.md) ·
 [Pfänder sample](pfander_silicon_sample/README.md) ·
 [Voelkel validation](voelkel_validation/README.md)
