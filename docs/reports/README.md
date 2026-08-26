@@ -13,7 +13,7 @@ Sub-reports: [calibration design](calibration_design/README.md) ·
 
 | entry | recipe | why it exists |
 | --- | --- | --- |
-| **primary** | four Qwen runs' averaged effects, shrunk within-outcome by 0.5 then globally by 0.402; levels, offsets and residual structure from DeepSeek-V4-Flash with residuals scaled 0.90; party offsets from Qwen2.5-72B blended half-way to external gaps; three outcomes anchored to external survey levels | best on every metric we can measure out-of-fold |
+| **primary** | eight Qwen runs' averaged effects (four of each model, averaged within model first), shrunk within-outcome by 0.5 then globally by 0.416; rows from the quota-demographics 7B run; levels, offsets and residual structure from DeepSeek-V4-Flash with residuals scaled 1.12; party offsets from the quota-demographics 72B run, blended half-way to external gaps; three outcomes anchored to external survey levels | best on every metric we can measure out-of-fold |
 | secondary-1 | the same, without the global shrinkage | hedges the one calibration constant that would be badly wrong if Pfänder's real effects are much larger than the three reference studies' |
 | secondary-2 | raw Qwen2.5-7B, uncalibrated | the no-assumptions baseline; makes every calibration's contribution measurable after the fact |
 
@@ -36,9 +36,11 @@ the first.
 | **the shipped recipe** | 0.358 | 0.342 | 0.576 | **0.426** |
 | *a fresh human replication* | *0.642* | *0.640* | *0.514* | *0.599* |
 
-The submission recovers **71% of what a second sample of real humans achieves**.
-Directional agreement is 77.3 / 72.7 / 61.1% against the replication's 88.2 /
-93.2 / 66.7%.
+That row is a **proxy**: the reference studies have one run per model, so it
+measures a two-run ensemble. The submitted entry averages eight, whose measured
+reliability is 0.964 against the proxy's 0.870, which projects **r ≈ 0.448 —
+about 75% of what a second sample of real humans achieves**. Directional
+agreement is 77.3 / 72.7 / 61.1% against the replication's 88.2 / 93.2 / 66.7%.
 
 ## The five things that actually mattered
 
@@ -159,7 +161,60 @@ kernel-density overlap and W1 and KS are ECDF-based, so jittering answers off th
 spikes moved OVL by 0.000 in eleven of twelve cells. A real and visible artefact
 that none of the scored metrics can see.
 
-### 7. Text-only sampling, and where it cannot reach
+### 7. Letting the model invent its demographics is a mistake
+
+Pfänder prints gender, age band and race in the profile but leaves education,
+income and party to the model. Asked to invent them, all three models produce an
+affluent, educated, Democratic United States:
+
+| | invented | quota-drawn | US population |
+| --- | --- | --- | --- |
+| income `< $30,000` | 0.8% | **12.9%** | ~13.5% |
+| — in the control arm | **18 respondents** | **264** | (benchmark minimum: 30) |
+| education `< high school` | 3.5% | 9.3% | ~9% |
+| party Republican | 13.1% | 28.2% | ~29% |
+
+The control-arm count is the part that matters: `Less than $30,000` is the
+dummy-coding reference level for every income interaction, and at 18 respondents
+it falls below the benchmark's minimum group size, so it is skipped and income
+effects are estimated against a level that is not there. Re-sampling on
+CCAM-drawn profiles fixes it, and **costs nothing on the effects** — the quota
+run correlates 0.864 with the three elicited seeds where those seeds correlate
+0.846 with each other, so it sits inside the seed-noise band.
+
+**The predicted risk went the other way, which is worth recording.** Because
+Pfänder *elicits* party rather than printing it, and because models
+under-express *given* demographics in all three reference studies, handing the
+model its party looked likely to flatten the gaps. It improved them for every
+model: Qwen2.5-7B from r = −0.306 to +0.559 against the external gaps,
+Qwen2.5-72B from +0.838 to **+0.912**, V4-Flash from +0.487 to +0.838.
+
+### 8. The response-shape correction had to be reversed on the target study
+
+Worth recording as the clearest case in this project of a calibration that
+transferred badly. Measured on the reference studies' raw samples, these models
+are over-dispersed by about 1.07×, and shrinking residuals by 0.90 raises the KDE
+overlap in **all nine** (study, model) cells. That shipped.
+
+On Pfänder it is wrong twice over. V4-Flash's raw dispersion here is already
+right — sd ratio 1.014 against human, because Pfänder's headline outcomes are
+multi-item composites whose averaging removes the noise the single sliders
+carried. And the reconstruction shrinks spread further on its own, so the entry
+came out **13% under-dispersed**.
+
+What made the reversal possible is that TISP measures Pfänder's own questions
+closely enough to grade *dispersion*, not just levels: standard deviations of
+20.62, 27.99 and 26.02 on the three `near`-graded outcomes. Fitting the factor
+end-to-end against those, and iteratively because clipping makes the response
+sublinear, gives 1.12 and a mean dispersion ratio of **1.011**.
+
+| residual factor | mean sd ratio | mean abs. error |
+| --- | --- | --- |
+| 0.90 (transferred) | 0.870 | 0.130 |
+| 1.035 | 0.962 | 0.071 |
+| **1.12 (shipped)** | **1.011** | **0.057** |
+
+### 9. Text-only sampling, and where it cannot reach
 
 Pfänder's instrument is **pure text** — no images, video, audio or embeds — so
 the handicap does not apply to the target study at all. In Goldwert the seven
@@ -205,6 +260,15 @@ before it beats leaving our own profile alone.
   `pearson_r` is −0.041 for Qwen and +0.001 for V4-Flash against a human
   replication's +0.146. The demographic calibration improves the *reported*
   subgroup analyses without any claim that the underlying signal is real.
+- **The 72B/V4-Flash split on respondent coherence is unresolved.** Against human
+  correlations from TISP, Qwen2.5-72B on quota demographics is much the best on
+  *cross-outcome* coherence (mean error 0.072 against V4-Flash's 0.115) while
+  V4-Flash is much the best on *within-battery* consistency (0.026 against
+  0.162 — 72B is over-consistent at α 0.978 where humans are 0.950). V4-Flash
+  keeps the structural role because it also wins on the two things the benchmark
+  actually scores here, levels and dispersion; the cross-outcome advantage
+  reaches nothing Pfänder scores. If it scored a cross-construct composite, the
+  choice would go the other way.
 - **`letter_content` in the Goldwert samples on disk is still degenerate.** The
   template is fixed; the samples predate the fix. It is not a scored outcome and
   was not worth re-sampling for alone, and that judgement is recorded rather than
