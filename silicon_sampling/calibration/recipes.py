@@ -450,23 +450,80 @@ BEST_RANKERS = (
     "qwen25_7b",
     "qwen25_7b_seed2",
     "qwen25_7b_seed3",
+    "qwen25_72b_demo",
     "qwen25_72b",
     "qwen25_72b_seed2",
+    "qwen25_72b_seed3",
 )
 
 #: The run three independent sources agree is closest to real response levels.
 GROUNDED = "v4_flash"
 
 #: Which run supplies party offsets; see ``Recipe.party_offsets_from``.
-PARTY_DONOR = "qwen25_72b"
+#:
+#: The quota-demographics Qwen2.5-72B run, which is the best of the ten measured
+#: against the external party gaps: RMSE 7.36 pp and r +0.912, against 7.48 and
+#: +0.838 for the same model on invented demographics, 8.82 and +0.838 for
+#: DeepSeek-V4-Flash, and 19.09 for submitting no party gap at all.
+#:
+#: Handing the model its party turns out to *help* every model's gap structure,
+#: which is the opposite of what the reference studies suggested would happen:
+#: Qwen2.5-7B goes from r -0.306 to +0.559, V4-Flash from +0.487 to +0.838.
+PARTY_DONOR = "qwen25_72b_demo"
+
+#: Human within-arm dispersion on Pfander's own outcomes, from TISP.
+#:
+#: Standard deviations in points of the 0-100 scale, over TISP's US sample, for
+#: the items the crosswalk grades ``near`` -- the same questions Pfander asks, so
+#: this is the closest thing to Pfander's own human dispersion that exists.
+#: ``policy_specific_mean`` is excluded: its TISP mapping is ``construct-only``.
+HUMAN_DISPERSION = {
+    "trust_multidimensional": 20.62,
+    "trust_post": 27.99,
+    "policy_role_mean": 26.02,
+}
 
 #: Multiplier on the residual term; see ``Recipe.residual_scale``.
 #:
-#: 0.90, chosen because it improves the KDE overlap in every one of the nine
-#: (study, model) cells available rather than because it is the per-cell optimum
-#: -- the per-outcome optima on Voelkel run 0.85 to 0.95 for eight of nine
-#: outcomes, so a single round value inside that band needs no fitting.
-RESIDUAL_SCALE = 0.90
+#: **Fitted end to end against Pfander's own human dispersion, which reverses an
+#: earlier cross-study estimate.**  Measured on the raw samples of the three
+#: reference studies, these models are over-dispersed by about 1.07x and scaling
+#: residuals by 0.90 raises the KDE overlap in all nine (study, model) cells.  So
+#: 0.90 shipped.
+#:
+#: On Pfander that is wrong twice over.  DeepSeek-V4-Flash's raw dispersion here
+#: is already right -- sd ratio 1.014 against the three ``near``-grade TISP
+#: anchors, not 1.07 -- because Pfander's headline outcomes are multi-item
+#: composites whose averaging removes the very noise the single sliders carried.
+#: And the reconstruction shrinks spread further on its own: at a residual scale
+#: of 0.90 the built entry came out at 0.846 to 0.926 of the donor's spread, so
+#: the submission sat **13% under**-dispersed against TISP.
+#:
+#: The factor is therefore fitted where it is applied -- on the finished entry,
+#: against :data:`HUMAN_DISPERSION` -- rather than transferred from studies with a
+#: different instrument.  Both numbers are real; the direct one wins because it
+#: measures the target study's own questions.
+#:
+#: Fitting has to be iterative because the response is **sublinear**: raising the
+#: factor from 0.90 to 1.035, a factor of 1.15, moved the entry's dispersion ratio
+#: only from 0.870 to 0.962, a factor of 1.106, because residuals pushed outward
+#: clip against the ends of the scale.  Three builds land it:
+#:
+#: =======  =============  ==========
+#: factor   mean sd ratio  mean |err|
+#: =======  =============  ==========
+#: 0.90     0.870          0.130
+#: 1.035    0.962          0.071
+#: **1.12** **1.011**      **0.057**
+#: =======  =============  ==========
+#:
+#: A single global factor cannot fit three outcomes exactly -- at 1.12 they sit at
+#: 1.098, 1.004 and 0.931 -- and per-outcome factors are not worth three
+#: parameters fitted on three anchors.
+#:
+#: Like every other scale factor here it cannot move the sort key.  It reaches the
+#: variance ratio, OVL, KS and W1.
+RESIDUAL_SCALE = 1.12
 
 #: Externally estimated Democrat-minus-Republican gaps on Pfander's outcomes, in
 #: pp of scale range.  Every number comes from public data and none from Pfander.

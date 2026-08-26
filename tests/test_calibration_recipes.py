@@ -238,7 +238,7 @@ def test_residual_scaling_touches_only_the_within_cell_spread():
     and it is worth a test because the obvious alternative -- scaling the whole
     outcome around its mean -- would silently shrink every effect too.
     """
-    assert 0.5 < R.RESIDUAL_SCALE < 1.0
+    assert 0.8 < R.RESIDUAL_SCALE < 1.3
     assert R.hybrid_default().residual_scale == pytest.approx(R.RESIDUAL_SCALE)
     # The uncalibrated baseline must stay untouched, or it stops being a baseline.
     assert R.uncalibrated("qwen25_7b").residual_scale == pytest.approx(1.0)
