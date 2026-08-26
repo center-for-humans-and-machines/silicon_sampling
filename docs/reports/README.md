@@ -7,6 +7,7 @@ synthetic respondents × 33 columns, all passing the benchmark's validator.
 Sub-reports: [**what to expect on Pfänder**](prediction.md) ·
 [**nested cross-validation**](cross_validation.md) ·
 [the recipe, part by part](the_recipe.md) ·
+[two Voelkel studies](voelkel_2026.md) ·
 [calibration design](calibration_design/README.md) ·
 [level anchors](level_anchors.md) · [media loss](media_loss.md) ·
 [Pfänder sample](pfander_silicon_sample/README.md) ·
