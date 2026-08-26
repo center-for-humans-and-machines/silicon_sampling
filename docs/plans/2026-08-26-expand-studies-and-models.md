@@ -18,12 +18,31 @@ Two constraints given with the task:
 
 ## Todo
 
-### A. Muse-Glimmer feasibility — do this first, it can block
-- [ ] A1. Confirm the checkpoint is on DAIS and find its path
-- [ ] A2. Confirm the vLLM container can load it (arch supported, dtype, KV cache)
-- [ ] A3. Decide GPU count (1 vs 2) and measure throughput on a smoke run
-- [ ] A4. If any of A1–A3 fails: Slack the user, park this branch, continue with B
-- [ ] A5. Register the run key, engine defaults and label in `models.py`
+### A. Muse-Glimmer feasibility — **BLOCKED**, user pinged 2026-08-26 19:09
+- [x] A1. Checkpoint is on DAIS and complete:
+      `/opt/huggingface/hub/models--meta-models--Muse-Glimmer-30B`, two safetensors
+      shards, bf16, `HF_HOME=/opt/huggingface`
+- [x] A2. **The container cannot load it.** Four findings, each independently fatal:
+      * vLLM 0.23.0 does not register `MuseGlimmerForConditionalGeneration` — 365
+        architectures, zero matches on "muse" or "glimmer"
+      * transformers 5.12.1 does not know `muse_glimmer`; `AutoConfig.from_pretrained`
+        raises "Transformers does not recognize this architecture"
+      * `config.json` has no `auto_map` and the snapshot ships no modelling files, so
+        there is no `trust_remote_code` path
+      * vLLM's Transformers backend (`TransformersMultiModalForCausalLM`) exists but
+        routes through transformers' AutoConfig, which is where the previous point fails
+      It is a genuinely new multimodal architecture — `image_token_id`, a projector,
+      `processor_config.json`, `text_config.model_type = muse_glimmer_text` — not a
+      renamed Qwen or Llama.
+- [ ] A3. Throughput — cannot measure until A2 is resolved
+- [x] A4. Slacked the user with the diagnosis and three unblock routes: a newer
+      vLLM/transformers in the container, a checkpoint variant shipping remote code,
+      or a different image. Not attempting an in-job `pip install -U` unilaterally,
+      because it risks the four working samplers.
+- [ ] A5. Register the run key once a route is chosen
+
+**Consequence for the plan.** D4 and the model-space half of E2 are parked. The
+study expansion is unaffected and is now the critical path.
 
 ### B. CCC study package
 - [ ] B1. `silicon_sampling/ccc/`: paths, outcomes, instrument, convert, templates,
@@ -108,4 +127,4 @@ D5 is deliberately last. E once D1–D4 are in, F when D5 lands, G alongside E.
 
 ## Status
 
-Started 2026-08-26. Nothing complete yet.
+Started 2026-08-26. A is blocked on the user; B is in progress.
