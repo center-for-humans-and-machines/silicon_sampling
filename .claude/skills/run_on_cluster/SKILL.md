@@ -18,7 +18,9 @@ Every endpoint that touches a cluster takes `cluster: "dais"`:
 Locked-down settings (slurm template, bind mounts, env vars) are baked into the server. On DAIS the main container image may be chosen from a fixed allowlist via optional `container`.
 
 Default image: `/dais/fs/scratch/ykeller/containers/apptainer/glm_52_vllm.sif`.
-Optional: `/dais/fs/scratch/ykeller/containers/apptainer/vllm-openai_latest.sif`.
+Optional:
+- `/dais/fs/scratch/ykeller/containers/apptainer/vllm-openai_latest.sif`
+- `/dais/fs/scratch/ykeller/containers/apptainer/vllm-openai-muse-glimmer.sif`
 
 Jobs may use **1 or 2 nodes** (`n_nodes` 1–2). GPUs per node: 1–8. Omit `gpu_type` to request any GPU; default `--mem 0` (whole node). Wall-time cap on DAIS is 24h.
 
@@ -59,7 +61,7 @@ Run an arbitrary command **on the login node** inside the Apptainer container. *
 
 Body: `{"cluster": "dais", "command": "<shell command>", "container"?: "<sif path>"}` (command max 4096 bytes, no newlines / NULs / control chars).
 
-`container` is optional. Omit for `glm_52_vllm.sif`. Allowlist: that default plus `vllm-openai_latest.sif`.
+`container` is optional. Omit for `glm_52_vllm.sif`. Allowlist: that default plus `vllm-openai_latest.sif` and `vllm-openai-muse-glimmer.sif`.
 
 ### `POST /run_in_job`
 Run a command **inside an already-running slurm job** via `srun --overlap`. Use this to exec into an interactive GPU allocation from `/request_single_gpu`, or to attach to a batch job.
@@ -101,7 +103,7 @@ Body:
 | `acc_config` | str? | Optional, `configs/accelerate/<name>.ya?ml`. |
 | `mem` | str? | SLURM `--mem` (e.g. `0` for whole node, `64G`). Defaults to `0`. |
 | `gpu_type` | str? | Pin `h200` or `b200`. Omit to request any GPU (`--gres=gpu:N`). |
-| `container` | str? | Main job image; allowlist: `glm_52_vllm.sif` (default) + `vllm-openai_latest.sif`. |
+| `container` | str? | Main job image; allowlist: `glm_52_vllm.sif` (default) + `vllm-openai_latest.sif` + `vllm-openai-muse-glimmer.sif`. |
 | `vllm_servers` | object[]? | Optional vLLM sidecar servers in `vllm-openai_latest.sif` before the main container. **Requires `n_nodes=1`.** |
 
 Pre-flight check: server refuses with **HTTP 409** if you already have ≥ `CC_MAX_JOBS` queued/running jobs.
@@ -174,6 +176,16 @@ curl -s -X POST http://cc_command_server:8765/submit_slurm_job \
 ```
 
 Pin a GPU type with `"gpu_type": "h200"` or `"gpu_type": "b200"`.
+
+**Submit a job in `vllm-openai-muse-glimmer.sif`:**
+```bash
+curl -s -X POST http://cc_command_server:8765/submit_slurm_job \
+  -H 'Content-Type: application/json' \
+  -d '{"cluster": "dais", "program_call": "python -m silicon_sampling ...", "time": "04:00:00",
+       "n_gpu": 1, "n_nodes": 1, "n_cpu": 12, "launcher": "python",
+       "run_group": "exp1", "project": "silicon_sampling",
+       "container": "/dais/fs/scratch/ykeller/containers/apptainer/vllm-openai-muse-glimmer.sif"}'
+```
 
 **Sync repo to DAIS, then monitor:**
 ```bash

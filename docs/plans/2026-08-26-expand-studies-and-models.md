@@ -54,8 +54,18 @@ study expansion is unaffected and is now the critical path.
 - [ ] B4. Modality audit — `System Preservation Framing` carries 12 images; every
       other arm has 0–2 against 1.5k–4.7k characters of prose, and no arm has
       video or audio
-- [ ] B5. Human reference: `score.load_humans()` over `CCC - Data - Recoded.csv`,
-      matching how the published R scripts compute effects
+- [x] B5a. **Estimand decided.** The published script fits
+      `Post ~ 1 + ConditionR + Pre` — ANCOVA with the pre-measure as a covariate,
+      HC3 robust SEs, `Control` as the reference. Pfänder's benchmark instead refits
+      `outcome ~ condition` with HC2 and **no covariate**.
+      For the cross-validation to predict Pfänder, `score.effects()` uses the
+      **simple ATE**, matching how Pfänder is actually scored. The ANCOVA is
+      computed alongside it, because the gap between them measures how much power
+      the pre-measure adds — and therefore how much of Pfänder's achievable
+      `pearson_r` is capped by noise in its own human effect estimates rather than
+      by our model. That is a prediction-relevant number nothing else supplies.
+- [ ] B5b. `score.load_humans()` over `CCC - Data - Recoded.csv`, with the
+      `ConditionR` pooling of the three placebo controls into one `Control`
 - [ ] B6. Render all 13 arm templates
 
 ### C. Independent verification of the templates — the step the audit exists for
