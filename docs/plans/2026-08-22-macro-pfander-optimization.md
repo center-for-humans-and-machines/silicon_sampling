@@ -246,7 +246,7 @@ and been abandoned — and (b) **agent-days to build new study packages**, empir
 1.5–2 days each. Local 4090 time is free and currently 100% idle.
 
 Rules: never request 8 GPUs; 4–8 h walls, never 24 h; two jobs in flight; resume
-by resubmitting the identical body (`scripts/dais_auto_resume.sh`).
+by resubmitting the identical body — **by hand**. The loop that once did this automatically has been deleted; see `scripts/dais_submit_v4_flash.md`.
 
 ### Day by day
 

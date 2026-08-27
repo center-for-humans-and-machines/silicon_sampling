@@ -101,19 +101,25 @@ done
 cp data/pfander/silicon_sampling/v4_flash/tier1_submission.csv /opt/cluster_transfer/pfander/v4_flash/
 ```
 
-## Letting it resume unattended
+## Resuming: by hand, one job at a time
 
-`scripts/dais_auto_resume.sh` polls, and whenever no job for a run group is in the
-queue and the target is not reached, resubmits the identical body. Start it from
-the agent container *after* confirming a run produces sane completions — an
-automatic resubmit loop pointed at bad settings just burns allocation:
+**There is no resume loop and there must not be one.** `scripts/dais_auto_resume.sh`
+was deleted after it created 44 slurm jobs in half an hour, each holding two H200s
+and dying seconds later on an import error, because it watched one study's progress
+file while a different study inside the same job was being sampled first.
 
-```bash
-scripts/dais_auto_resume.sh v4voelkel \
-    data/Voelkel/silicon_sampling/v4_flash/answers.jsonl 6203 voelkel.json &
-scripts/dais_auto_resume.sh v4pfander \
-    data/pfander/silicon_sampling/v4_flash/answers.jsonl 18000 pfander.json &
-```
+To resume, do this instead:
+
+1. Read the previous job's `sample.log`. A run that stopped at its wall-time limit
+   looks completely different from one that never started, and only the log says
+   which.
+2. Count what is actually on disk: `wc -l answers.jsonl`.
+3. Submit **one** job with the identical body. `answers.jsonl` is the source of
+   truth, so the wrapper asks only for the remainder.
+
+Step 1 is the one a loop cannot do, and it is the one that matters — every
+resubmission that wasted allocation on this project would have been prevented by
+reading the log first.
 
 ## Measured throughput (2026-08-18, 4xH200, warm TileLang cache)
 
