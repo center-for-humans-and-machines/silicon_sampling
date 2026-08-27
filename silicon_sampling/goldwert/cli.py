@@ -183,7 +183,6 @@ def main(argv: list[str] | None = None) -> int:
     csv_cmd.add_argument("--run", default=DEFAULT_RUN)
 
     args = parser.parse_args(argv)
-    pd.set_option("display.width", 220)
 
     if args.command == "validate":
         from .validate import dry_run_all
@@ -246,6 +245,7 @@ def main(argv: list[str] | None = None) -> int:
         from .templates import write_modality_audit
 
         rows = write_modality_audit()
+        pd.set_option("display.width", 220)
         table = pd.DataFrame(rows)
         shown = table[
             [
@@ -284,6 +284,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "verify-outcomes":
+        pd.set_option("display.width", 220)
         frame = pd.read_csv(paths.RESPONSES_CSV, low_memory=False)
         table = oc.verify_against_published(frame)
         print(table.to_string(index=False))
@@ -346,6 +347,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "pfander-anchors":
+        pd.set_option("display.width", 220)
         frame = pd.read_csv(paths.RESPONSES_CSV, low_memory=False)
         table = oc.pfander_anchor_table()
         print(

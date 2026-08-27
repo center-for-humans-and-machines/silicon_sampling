@@ -163,7 +163,6 @@ def main(argv: list[str] | None = None) -> int:
     csv_cmd.add_argument("--run", default=DEFAULT_RUN)
 
     args = parser.parse_args(argv)
-    pd.set_option("display.width", 220)
 
     if args.command == "sample":
         from ..sampling.engine import configure_runtime
@@ -219,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         from .templates import write_modality_audit
 
         rows = write_modality_audit()
+        pd.set_option("display.width", 220)
         table = pd.DataFrame(rows)
         print(
             table[

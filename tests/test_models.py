@@ -53,3 +53,40 @@ def test_every_study_entry_point_imports_without_pandas_or_scipy():
                 importlib.import_module(f"silicon_sampling.{study}.{module}")
             finally:
                 builtins.__import__ = real
+
+
+def test_no_cli_touches_pandas_before_dispatching_a_subcommand():
+    """``sample`` must not pay for pandas, and the lazy import is not enough.
+
+    Two of the CLIs called ``pd.set_option("display.width", 220)`` immediately
+    after ``parse_args`` — on *every* code path, including ``sample``. Making the
+    module-level import lazy did not help: the first attribute access still
+    resolved it, so the sampler still died in the Muse-Glimmer container, which
+    ships no pandas.
+
+    That cost twelve retry attempts per study on the cluster, twice, because the
+    earlier guard test only checked that the module *imported*. Importing is not
+    running. This checks the region between argument parsing and the first
+    subcommand branch, which is the region ``sample`` always executes.
+    """
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parents[1] / "silicon_sampling"
+    offenders = {}
+    for study in ("pfander", "voelkel", "icpc", "goldwert", "ccc"):
+        source = (root / study / "cli.py").read_text()
+        start = source.find("parser.parse_args(")
+        if start < 0:
+            continue
+        first_branch = source.find("args.command ==", start)
+        if first_branch < 0:
+            continue
+        preamble = source[start:first_branch]
+        used = re.findall(r"\bpd\.\w+", preamble)
+        if used:
+            offenders[study] = sorted(set(used))
+    assert not offenders, (
+        "pandas is touched before subcommand dispatch, so `sample` will fail "
+        f"wherever pandas is absent: {offenders}"
+    )
