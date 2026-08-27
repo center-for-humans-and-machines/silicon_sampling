@@ -26,9 +26,21 @@ respondents in about ten hours of wall clock.
 So: **set the limit at the estimated runtime plus roughly 50%**, and combine work
 that shares a model into one job rather than submitting it twice. The two
 Qwen2.5-72B runs go in a single job for that reason — one queue wait instead of
-two. `scripts/dais_auto_resume.sh` stays useful as a safety net for a job that
-dies unexpectedly, but it must not be the mechanism that a run is *expected* to
-need.
+two.
+
+## Never automate resubmission
+
+There was a `scripts/dais_auto_resume.sh` that resubmitted a job when it saw none
+of its own queued. It is **deleted, and must not be reintroduced.** Its failure
+mode is not theoretical: a run whose progress file stayed at zero — because a
+second study inside the same job was being sampled first — read that as "not
+started" and submitted **44 slurm jobs**, each allocating two H200s and dying
+seconds later on an import error. That is other people's compute, on a shared
+cluster, spent on nothing.
+
+Resubmit by hand, one job at a time, having first read the previous job's log and
+confirmed what actually went wrong. A loop cannot do the reading, and the reading
+is the part that matters.
 
 Post these to the CC command server from the agent container.
 

@@ -89,7 +89,10 @@ study expansion is unaffected and is now the critical path.
 - [ ] D4. Muse-Glimmer-30B on **all five** studies — Pfänder, Voelkel-SDC, ICPC,
       Goldwert, CCC — because a model is only usable in the cross-validation if it
       has run everywhere. Roughly 51,800 respondents; combine into one DAIS job per
-      the cluster-queue rules, sized with ~50% headroom
+      the cluster-queue rules, sized with ~50% headroom.
+      **Submit every job explicitly.** No automated resubmission: the auto-resume
+      loop is deleted after it created 44 two-GPU jobs against a run it wrongly
+      read as unstarted. Read the previous job's log, then submit one job.
 - [ ] D5. **Last**: DeepSeek-V4-Flash on CCC
 
 ### E. Evaluation at the pre-V4 state

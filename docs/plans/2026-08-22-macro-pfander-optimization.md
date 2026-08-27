@@ -641,12 +641,7 @@ standing rule and continued on the local GPU.
 It cost almost nothing, for two reasons worth keeping. Slurm does not care about
 the submitting host, so job 421979 ran on through the outage and took
 `qwen25_72b_seed3` from 896 to 8,192 respondents unattended; and `answers.jsonl`
-is the source of truth, so resubmitting asked only for the remainder. The one
-real hazard was the auto-resume loop: its `queued()` check greps `squeue` output,
-which during the outage returned an error string that matched nothing, so it
-concluded no job was queued and tried to submit six times. The submissions all
-failed at the same precheck, so no duplicates were created -- but the loop should
-distinguish "no job queued" from "cannot tell", and it does not.
+is the source of truth, so resubmitting asked only for the remainder. The one real hazard was the auto-resume loop, which has since been deleted outright after it submitted 44 jobs against a run it wrongly believed had not started. All DAIS jobs are now submitted explicitly, one at a time, after reading the previous job's log.
 
 ### Negative results worth keeping
 
