@@ -22,12 +22,17 @@ import json
 import sys
 from pathlib import Path
 
-import pandas as pd
+from ..lazy import lazy_module
 
 from ..models import DEFAULT_RUN, MODELS, engine_defaults, model_id
 from ..sampling.driver import SamplerConfig
 from ..sampling.engine import EngineConfig, cache_root
 from . import paths, profiles
+
+#: Imported on first use.  The sampling entry point is this module, and it has
+#: to run in the Muse-Glimmer container, which ships no pandas; only the
+#: reporting subcommands here touch it.
+pd = lazy_module("pandas")
 
 #: Default context cap for a sampling run.  The longest transcript this instrument
 #: can produce is about 16k tokens -- twice the Pfaender figure, because every

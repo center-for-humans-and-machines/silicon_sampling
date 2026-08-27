@@ -21,12 +21,15 @@ def test_muse_glimmer_is_registered_with_its_own_container():
     assert "muse_glimmer_30b" in M.MULTIMODAL_CAPABLE
 
 
-def test_every_study_sampler_imports_without_pandas_or_scipy():
+def test_every_study_entry_point_imports_without_pandas_or_scipy():
     """The Muse-Glimmer image ships neither, and the sampler must still start.
 
-    Guards the lazy-import arrangement: a future module-level ``import pandas``
-    anywhere on the sampling path would make that container unusable, and the
-    failure would only appear on the cluster.
+    Covers ``cli`` as well as ``run``, because **the cluster wrapper invokes
+    ``python -m silicon_sampling.<study>.cli sample``** — and an earlier version of
+    this test checked only ``run``.  It passed, the jobs were submitted, and two of
+    the five studies then burned twelve retry attempts each on the cluster before
+    failing at ``cli.py: import pandas``.  Testing the module the entry point
+    actually is, rather than the one underneath it, is the whole point.
     """
     import builtins
     import importlib
@@ -38,11 +41,15 @@ def test_every_study_sampler_imports_without_pandas_or_scipy():
             raise ModuleNotFoundError(f"No module named '{name}'")
         return real(name, *args, **kwargs)
 
-    for study in ("pfander", "voelkel", "icpc", "goldwert", "ccc"):
-        for name in [m for m in list(sys.modules) if m.startswith("silicon_sampling")]:
-            del sys.modules[name]
-        builtins.__import__ = guard
-        try:
-            importlib.import_module(f"silicon_sampling.{study}.run")
-        finally:
-            builtins.__import__ = real
+    studies = ("pfander", "voelkel", "icpc", "goldwert", "ccc")
+    for study in studies:
+        for module in ("cli", "run"):
+            for name in [
+                m for m in list(sys.modules) if m.startswith("silicon_sampling")
+            ]:
+                del sys.modules[name]
+            builtins.__import__ = guard
+            try:
+                importlib.import_module(f"silicon_sampling.{study}.{module}")
+            finally:
+                builtins.__import__ = real

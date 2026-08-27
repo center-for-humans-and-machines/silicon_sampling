@@ -77,7 +77,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-import pandas as pd
+from ..lazy import lazy_module
+
+#: Imported on first use, so the sampler stays importable in the Muse-Glimmer
+#: container, which ships no pandas.  Only the verification helpers here use it.
+pd = lazy_module("pandas")
 
 
 @dataclass(frozen=True)
