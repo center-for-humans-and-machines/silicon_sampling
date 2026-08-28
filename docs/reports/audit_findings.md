@@ -467,10 +467,11 @@ Worth stating, because a defect list reads as if everything is broken:
 ## Reproducing this
 
 ```
-python scripts/nested_cv.py --splits 20 --bootstrap 2000   # Section 1, both readings
-python scripts/nested_benchmark.py                          # all four sections
-python scripts/score_ccc_holdout.py                         # the structural hold-out
-python -m pytest tests/test_calibration_folds.py            # the guards on the fixes
+python scripts/nested_cv.py --bootstrap 2000        # Section 1, one split, with intervals
+python scripts/nested_cv.py --splits 8              # the same, averaged over eight splits
+python scripts/nested_benchmark.py                  # all four benchmark sections
+python scripts/score_ccc_holdout.py                 # the structural hold-out
+python -m pytest tests/test_calibration_folds.py    # the guards on the fixes
 ```
 
 `openpyxl` is required for `tests/test_icpc.py` and is not in the container
