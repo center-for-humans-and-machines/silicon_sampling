@@ -641,6 +641,18 @@ PARTY_GAP_ANCHORS = {
 #: gap on a trust battery that twelve matched items say is 4.0.  Half moves the
 #: measured distance to the anchors from RMSE 7.4 pp to about 3.7 while leaving
 #: the model's own topic ordering, which is already right (r = +0.835), intact.
+#:
+#: **Re-examined once CCC replaced six of the nine anchors with direct party
+#: measurements, and kept.**  The stated reason above no longer covers those six,
+#: so the question became quantitative.  Five outcomes now carry two independent
+#: estimates of the same gap -- the pre-CCC proxy and CCC's measurement -- and
+#: they disagree by an RMS of 9.07 pp, putting about 6.4 pp of error on a single
+#: anchor against the donor's own 3.6 pp.  Inverse-variance weighting on those
+#: numbers gives 0.24, not more than 0.5.  That is a lower bound: four of the five
+#: disagreements run the same way, so much of the 9.07 is bias in the old CCAM
+#: values (shrunk by a judgement factor of 0.6 that was too aggressive) rather
+#: than noise in the new ones, and charging it to CCC instead moves the optimum to
+#: about 0.6.  The defensible range is 0.24 to 0.6 and this sits inside it.
 PARTY_GAP_WEIGHT = 0.5
 
 #: Mean absolute human intervention effect, in pp of scale range, per study.

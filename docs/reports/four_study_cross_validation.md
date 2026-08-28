@@ -189,10 +189,11 @@ guard was checked against the known duplicate before being relied on: it reports
 To restore an eighth run, re-sample it against `qwen25_7b_seed2`'s profile set —
 the one replicate set Qwen2.5-72B has never used.
 
-## 5. Three calibrations that do not work
+## 5. Four calibrations tested; none changes the submission
 
-CCC opened three new routes. All three were tested and none survives; they are
-recorded because the measurements are the useful part.
+CCC opened four new routes. Three are rejected and the fourth is a constant
+re-examined and kept. They are recorded because the measurements are the useful
+part.
 
 **Level expansion.** If the models compress control-arm levels toward the
 midpoint, regressing human means on ours across outcomes recovers an expansion
@@ -239,6 +240,28 @@ the mass sitting in it is worth about half a dollar of the mean. The recipient
 differs in kind too — an unnamed advocacy organisation against the American
 Meteorological Society — and the authors disclaim level representativeness for
 their sample. The anchor stays `construct-only` and unused.
+
+**Raising the party-gap blend weight.** `PARTY_GAP_WEIGHT = 0.5` moves the
+model's party offsets halfway to the external anchors, and its written reason —
+"different instruments, and two of three contrasting ideology rather than party"
+— stopped applying to six of the nine when CCC replaced them with *directly
+measured* party gaps on near-identical items. That looks like a reason to raise
+it, especially given the CCC hold-out showing raw model gaps at roughly half
+their human size.
+
+The arithmetic says otherwise. Five outcomes now have two independent estimates
+of the same Pfänder party gap, the pre-CCC proxy and the CCC measurement, and
+they disagree by an RMS of **9.07 pp** — implying about 6.4 pp of error in a
+single anchor. The shipped donor sits 7.36 pp from the anchors, so its own error
+is only about 3.6 pp, and inverse-variance weighting would put just **0.24** on
+the anchor. That figure is a lower bound, because four of the five disagreements
+run the same way: the pre-CCC values were CCAM items shrunk by a judgement factor
+of 0.6 that was evidently too aggressive, so much of the 9.07 pp is *bias in the
+old source* rather than noise in the new one. Charging that bias to CCC instead
+puts the optimum nearer 0.6.
+
+So the defensible range is roughly 0.24 to 0.6 and **0.5 sits inside it**. The
+constant stays, now for a measured reason rather than a stated one.
 
 ## 6. Why CCC's ceiling is low, and two anchors that looked free
 
