@@ -1,3 +1,11 @@
+> **Superseded** by
+> [four_study_cross_validation_verified.md](four_study_cross_validation_verified.md),
+> which re-derives the cross-validation this rests on and re-states every
+> prediction. The headline `pearson_r` moves **0.35 → 0.30**, Section 2 moves from
+> "near zero" to slightly negative on four out-of-fold studies rather than one,
+> and the intervals are now the benchmark's own cluster bootstrap rather than a
+> judgment about where to trim.
+
 # What to expect on Pfänder
 
 [← back to the final report](README.md) · basis:
