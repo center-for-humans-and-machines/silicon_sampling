@@ -394,8 +394,9 @@ def reliability(estimate, se) -> float:
     return float(max(0.0, 1.0 - np.nanmean(se**2) / spread))
 
 
-def evaluate(data: dict, names: list[str], available: tuple[str, ...],
-             bootstrap: int) -> tuple[list[dict], list[dict]]:
+def evaluate(
+    data: dict, names: list[str], available: tuple[str, ...], bootstrap: int
+) -> tuple[list[dict], list[dict]]:
     """Score every variant on every fold, for one half-split of the humans."""
     rows, chosen = [], []
     for held in names:
@@ -672,9 +673,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {what:42s} {cells}")
 
     if across is not None:
-        print(
-            f"\n\n=== averaged over {len(seeds)} half-splits of the humans ===\n"
-        )
+        print(f"\n\n=== averaged over {len(seeds)} half-splits of the humans ===\n")
         print(
             "  A single split is what Pfander will do, so the block above is the\n"
             "  right model of one score.  It is the wrong tool for ranking variants:\n"
@@ -688,15 +687,19 @@ def main(argv: list[str] | None = None) -> int:
             .agg(["mean", "std", "min", "max"])
         )
         summary["se"] = summary["std"] / np.sqrt(len(seeds))
-        order = [w for w in [
-            "recipe, fitted on the other three",
-            "2x2: membership by prior, within fitted",
-            "2x2: membership fitted, within fixed 0.5",
-            *RULES,
-            *FIXED,
-            *[f"single: {r.replace('_v3', '')}, uncalibrated" for r in RUNS],
-            "human replication",
-        ] if w in summary.index]
+        order = [
+            w
+            for w in [
+                "recipe, fitted on the other three",
+                "2x2: membership by prior, within fitted",
+                "2x2: membership fitted, within fixed 0.5",
+                *RULES,
+                *FIXED,
+                *[f"single: {r.replace('_v3', '')}, uncalibrated" for r in RUNS],
+                "human replication",
+            ]
+            if w in summary.index
+        ]
         print(
             summary.loc[order, ["mean", "se", "std", "min", "max"]].to_string(
                 float_format=lambda v: f"{v:7.3f}"
@@ -710,9 +713,7 @@ def main(argv: list[str] | None = None) -> int:
                 if what in (base, "human replication"):
                     continue
                 delta = (
-                    across[across["what"] == what]
-                    .groupby("seed")["pearson_r"]
-                    .mean()
+                    across[across["what"] == what].groupby("seed")["pearson_r"].mean()
                     - across[across["what"] == base].groupby("seed")["pearson_r"].mean()
                 )
                 beats.append(

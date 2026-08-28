@@ -18,18 +18,28 @@ No new LLM inference was run and none is needed for anything here.
 
 ## 1. How much of the old report can you still trust?
 
-**Mostly valid, with one headline that moves and one section whose argument does
-not survive.** In more detail, by section:
+**The numbers are mostly valid; two of the conclusions drawn from them are not.**
+Every effect-recovery figure is about 6% too generous, the qualitative reading of
+§2 reverses once you stop reading one arbitrary half-split, and §5's party-gap
+argument does not survive at all. In more detail, by section:
 
 | section of the old report | verdict |
 | --- | --- |
 | §1 The fourth study | **Valid.** CCC's size, arm count and item overlap with Pfänder all check out. |
-| §2 Effect recovery, four folds | **Valid but every number is ~0.02 too high.** The direction, the ordering of variants and all three qualitative findings survive. See below. |
+| §2 Effect recovery, four folds | **Every number ~0.02 too high, and its headline conclusion is a seed artefact.** The variant *ordering* is stable; the claim that per-fold fitting costs you against a raw single model is not — it reverses on the split average. |
 | §3 CCC as a held-out structural test | **Numbers valid, mechanism misdescribed.** The table reproduces to three decimals. The "leakage guard" it credits was a `print` statement that filtered nothing — the numbers are unanchored because the script never anchors, not because a guard removed anchors. Two narrative sentences describe Qwen2.5-72B only and are false for the other two models. |
 | §4 The eighth run was not a run | **Valid, and it was the right call.** I re-derived the duplicate three independent ways and re-measured the reliability three ways; 0.957 stands. |
 | §5 Four calibrations tested | **Three of four valid; the party-gap argument does not survive.** Level expansion, quantile mapping and the Goldwert donation rejection all reproduce. The arithmetic that concludes "0.5 sits inside the defensible range" rests on a distance measured against the wrong anchor set, and contradicts a direct measurement printed two sections earlier in the same report. |
 | §6 Why CCC's ceiling is low | **Half valid.** The precision story is right; the specific comparison 0.372 → 0.624 is confounded, because the two estimands were scored on different pair sets (81 against 72). On the same 72 pairs the simple ATE scores 0.293, so the ANCOVA gain is larger than reported, not smaller. |
 | "What this changes for the Pfänder prediction" | **Superseded, and it already disagreed with `prediction.md`.** It says the basis is 0.305; `prediction.md` uses 0.330. Neither is now right. |
+
+**The claim that does not survive.** The old report's bolded conclusion —
+"Refitting membership and the within factor per fold scores 0.247, below plain
+Qwen2.5-7B at 0.303" — comes from a single half-split of the humans. Averaged
+over eight splits the fully-fitted recipe scores **0.310 against 0.254**, i.e.
+above the single model rather than below it, and the split-to-split standard
+deviation (0.04–0.08) is larger than nearly every difference the old table asks
+you to read. This is a correction in the recipe's favour.
 
 **The one number that really moves.** Every effect-recovery figure in the old
 report was computed with CCC's donation outcome on the wrong scale. CCC's
@@ -41,9 +51,10 @@ reaches 500 on a scale the code declares to be 0–100. Repairing that (rescalin
 each respondent's allocation back to the budget the instrument enforced, which is
 the identity on the human side) costs **0.015 to 0.024** on every four-fold mean.
 
-That is the whole of the movement. Every other correction I made is worth 0.003
-or less on the headline. So: the old numbers are systematically about 6% too
-generous, and nothing about their ordering or their qualitative reading changes.
+That is the whole of the *numerical* movement: every other correction I made is
+worth 0.003 or less on a fold mean, and the ordering of the variants within the
+table is stable. What is not stable is the comparison the old report drew across
+that ordering, which is the split-average point above.
 
 **What was checked and found fine.** The metric implementations are a faithful
 translation of the benchmark's `R/functions/statistics.R` — I compared them
@@ -80,10 +91,13 @@ every fold, so **no ensemble containing V4 was a candidate anywhere**.
 | single: Muse-Glimmer-30B, uncalibrated | 0.240 | 0.041 | 0.444 | 0.253 | 0.245 | *0.244* |
 | *human replication* | *0.372* | *0.642* | *0.640* | *0.527* | *0.545* | *0.542* |
 
-**The three-study finding survives, and is if anything sharper.** Refitting
-membership and the within-outcome factor per fold scores 0.231, below plain
-Qwen2.5-7B at 0.290. Pre-committing the structure scores 0.321. Nesting the
-fitting is what makes that visible.
+**The three-study finding does *not* survive, and this is the correction I
+expected least.** On this split, refitting membership and the within-outcome
+factor per fold scores 0.231, below plain Qwen2.5-7B at 0.290 — which is what
+the old report reported and read as "fitting the structure per fold costs you".
+Averaged over eight half-splits it is 0.310 against 0.254, i.e. **above** plain
+7B by +0.057, and it wins in 5 of 8 splits. The old conclusion is an artefact of
+one draw of the reference half. See the next section.
 
 **CCC got harder, not easier.** The shipped design's CCC fold went 0.101 → 0.009
 and the fully-fitted recipe 0.103 → 0.039. Both were resting on a donation
@@ -94,6 +108,60 @@ unchanged at 0.372, because the humans were always on the right scale.
 Best on ICPC by a distance (0.602 against 0.342 for the Qwen pair), near-zero on
 Goldwert (0.046), weakest single model averaged over four folds. That
 combination is what makes averaging pay.
+
+### Averaged over eight half-splits
+
+Every variant in the table above is scored against the same reference half, so
+that half's sampling noise is *common* to all of them: one draw of it moves the
+whole column together and can reorder any pair separated by less than it. A
+single split is exactly right for predicting a Pfänder **score**, because the
+benchmark fixes one preregistered split. It is the wrong instrument for deciding
+which recipe is better.
+
+| variant | mean over 8 splits | se | sd | min | max | *(at seed 42)* |
+| --- | --- | --- | --- | --- | --- | --- |
+| rule: positive training r, within 0.5 | **0.353** | 0.014 | 0.039 | 0.278 | 0.392 | *0.339* |
+| rule: average all available, within 0.5 | **0.350** | 0.014 | 0.040 | 0.278 | 0.392 | *0.339* |
+| Qwen pair, within 0.3 | 0.315 | 0.024 | 0.068 | 0.212 | 0.391 | *0.317* |
+| rule: positive training r, no within shrink | 0.314 | 0.016 | 0.044 | 0.231 | 0.362 | *0.316* |
+| Qwen pair, within 0.5 (shipped design) | 0.312 | 0.024 | 0.067 | 0.205 | 0.388 | *0.321* |
+| 2x2: membership fitted, within fixed 0.5 | 0.311 | 0.014 | 0.039 | 0.248 | 0.360 | *0.248* |
+| **recipe, everything fitted per fold** | **0.310** | 0.016 | 0.045 | 0.231 | 0.383 | ***0.231*** |
+| 7B alone, within 0.5 | 0.306 | 0.028 | 0.079 | 0.161 | 0.411 | *0.315* |
+| Muse alone, within 0.5 | 0.293 | 0.009 | 0.025 | 0.255 | 0.318 | *0.282* |
+| Qwen pair, no within shrink | 0.292 | 0.023 | 0.066 | 0.183 | 0.363 | *0.312* |
+| **2x2: membership by prior, within fitted** | **0.282** | 0.028 | 0.079 | 0.160 | 0.365 | ***0.288*** |
+| *single: Qwen2.5-72B, uncalibrated* | *0.257* | *0.018* | *0.050* | *0.187* | *0.336* | *0.247* |
+| *single: Qwen2.5-7B, uncalibrated* | *0.254* | *0.028* | *0.078* | *0.110* | *0.337* | *0.290* |
+| *single: Muse-Glimmer-30B, uncalibrated* | *0.244* | *0.004* | *0.012* | *0.223* | *0.256* | *0.245* |
+| *human replication* | *0.540* | *0.012* | *0.034* | *0.484* | *0.588* | *0.545* |
+
+**The split-to-split standard deviation is 0.04 to 0.08 — larger than almost
+every difference between variants.** That is the whole lesson. Reading an
+ordering off one split is reading noise, and the old report did exactly that.
+
+Against an uncalibrated Qwen2.5-7B, counting how often each variant wins:
+
+| variant | mean delta | splits won | *at seed 42* |
+| --- | --- | --- | --- |
+| rule: positive training r, within 0.5 | **+0.099** | **8/8** | *+0.049* |
+| rule: average all available, within 0.5 | **+0.096** | **8/8** | *+0.049* |
+| Qwen pair, within 0.3 | +0.061 | 8/8 | *+0.027* |
+| Qwen pair, within 0.5 (shipped design) | +0.059 | 8/8 | *+0.032* |
+| recipe, everything fitted per fold | +0.057 | 5/8 | ***−0.059*** |
+| 2x2: membership by prior, within fitted | +0.029 | 5/8 | *−0.002* |
+
+**Every calibrated variant beats a raw single model on the split average**, and
+the ones with pre-committed structure beat it in 8 of 8 splits. The old report
+concluded the opposite about the fully-fitted variant, and that conclusion came
+entirely from seed 42's draw. This is a correction *in the recipe's favour* —
+the only one in this report that runs that way.
+
+Two things do survive unchanged. The membership **rules** are still the best
+variants and the most stable (sd 0.039–0.040, the smallest of any calibrated
+variant, and 8/8 wins). And the prediction basis barely moves: 0.288 at seed 42
+against 0.282 averaged, so the Pfänder point prediction below does not depend on
+which of the two readings you take.
 
 ### The interval the benchmark will actually print
 
@@ -256,20 +324,31 @@ in fact understated.
 
 ### Basis
 
-The bracket is **0.231** (every choice charged as fitted) to **0.321** (structure
-pre-committed). The old report's basis reasoning stands and I keep it: grant the
-*form* of each choice as a prior — averaging comparable estimators is standard
-variance reduction, shrinking toward a group mean is standard empirical Bayes —
-and charge the *magnitude* as fitted, because which models and what factor both
-needed data. That is the "membership by prior, within fitted" row, **0.288**.
+The old report's basis reasoning stands and I keep it: grant the *form* of each
+choice as a prior — averaging comparable estimators is standard variance
+reduction, shrinking toward a group mean is standard empirical Bayes — and charge
+the *magnitude* as fitted, because which models and what factor both needed data.
+That is the "membership by prior, within fitted" row, **0.288** on the
+preregistered-style split and **0.282** averaged over eight. The two agree, which
+is the main reason to use it: it is the one basis that does not depend on which
+reading of the cross-validation you take.
 
-That figure has moved further than the others (0.330 → 0.288) for two separate
-reasons, both corrections: the donation repair (−0.023) and a fix to the row
-itself, which had been reusing a within-factor fitted jointly with a *different*
-membership rather than refitting it for the prior membership (−0.018).
+That figure has moved from the old report's 0.330 for two separate reasons, both
+corrections: the donation repair (−0.023) and a fix to the row itself, which had
+been reusing a within-factor fitted jointly with a *different* membership rather
+than refitting it for the prior membership (−0.018).
 
 Stepping the correlations up per fold to the shipped ensemble's reliability gives
 **0.298**.
+
+**The bracket is now narrower than the old report's and sits higher at its
+bottom.** On one split it runs 0.231 (every choice charged as fitted) to 0.321
+(structure pre-committed); on the split average it runs 0.282 to 0.353, and the
+fully-fitted variant is 0.310 rather than the bottom of the range. The old
+report's floor — "if none of the design transfers, `pearson_r` lands near 0.26,
+*below* an uncalibrated Qwen2.5-7B" — was the seed artefact. On the split average
+every calibrated variant beats every raw single model, so that floor should be
+read as roughly **0.28**, not below the single-model baseline.
 
 ### Section 1 — intervention effect recovery
 
@@ -373,6 +452,13 @@ trustworthiness in exactly that order.
 0.009, 0.339, 0.344 and 0.460 on CCC, Goldwert, ICPC and Voelkel. That spread is
 larger than every adjustment in this report put together, and larger than the
 bootstrap interval.
+
+**And the half-split adds a second layer of noise on top of it.** The same basis
+row ranges 0.160 to 0.365 across eight splits of the *same* four studies, sd
+0.079. Pfänder will be scored on one preregistered split, so this is not a
+correction to apply — it is a reason the point prediction cannot be tighter than
+the interval quoted above, and a warning against reading small differences
+between leaderboard rows.
 
 **The diagnostic that sets the ordering is how big Pfänder's true arm effects are
 relative to their standard errors**, and the corrected numbers make that sharper

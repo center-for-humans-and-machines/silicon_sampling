@@ -5,9 +5,10 @@
 Six auditors read the scripts and the package behind
 [four_study_cross_validation.md](four_study_cross_validation.md), each on a
 different surface, and raised 63 findings. Every CRITICAL and MAJOR one then
-went to an independent adversarial verifier told to refute it; 13 of 16 verdicts
-returned so far uphold the finding, usually with a corrected magnitude. Findings
-below are ordered by how much they move a reported number.
+went to an independent adversarial verifier told to refute it and to reproduce
+the defect itself before upholding it: **18 of 21 verdicts uphold the finding**,
+almost all of them with a corrected magnitude, and three refute it outright.
+Findings below are ordered by how much they move a reported number.
 
 Two categories throughout:
 
@@ -73,8 +74,14 @@ separated by less than it.
 
 The verifier's independent re-run found the report's bolded conclusion —
 "Refitting membership and the within factor per fold scores 0.247, below plain
-Qwen2.5-7B at 0.303" — **holds in 6 of 60 alternative splits**. On the split
-average the fully-fitted recipe is *above* plain Qwen2.5-7B, not below it.
+Qwen2.5-7B at 0.303" — **holds in 6 of 60 alternative splits**. My own eight-split
+run agrees: the fully-fitted recipe averages **0.310 against the single model's
+0.254**, winning 5 of 8 splits, where at seed 42 it loses by 0.059.
+
+The split-to-split standard deviation is **0.04 to 0.08**, larger than nearly
+every difference the old table asks the reader to interpret. The variant
+*ordering* is stable enough; the cross-comparison against a raw single model is
+not.
 
 *Fix.* `scripts/nested_cv.py --splits N` averages over N half-splits and reports
 the split-to-split spread alongside the single-split numbers, with the
@@ -82,9 +89,12 @@ distinction stated in the output. The single split stays the default because it
 is what the benchmark does.
 
 *Impact.* The single-split numbers are unchanged and remain the right basis for
-predicting a Pfänder *score*. What changes is the report's central qualitative
-claim about the value of pre-committing structure, which cannot be read off one
-split. The multi-split table is in the verified report.
+predicting a Pfänder *score*. What changes is the old report's central
+qualitative claim, and it changes **in the recipe's favour**: on the split
+average every calibrated variant beats every raw single model, and the
+pre-committed ones win 8 of 8 splits. The old report's stated floor — "if none of
+the design transfers, `pearson_r` lands near 0.26, below an uncalibrated
+Qwen2.5-7B" — was the artefact. The multi-split table is in the verified report.
 
 ### 3. The party-gap blend weight was defended by arithmetic that is infeasible on its own data
 
