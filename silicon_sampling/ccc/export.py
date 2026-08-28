@@ -72,9 +72,7 @@ def build_csv(run: str) -> dict:
     path = out_dir / "answers.jsonl"
     if not path.exists():
         raise SystemExit(f"no answers at {path}")
-    records = [
-        json.loads(line) for line in path.read_text().splitlines() if line.strip()
-    ]
+    records = list(read_records(path))
     frame = build_frame(records)
     target = out_dir / "samples.csv"
     frame.to_csv(target, index=False)

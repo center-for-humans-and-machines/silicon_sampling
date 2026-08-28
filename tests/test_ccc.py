@@ -35,3 +35,33 @@ def test_records_split_on_newlines_and_nothing_else(tmp_path):
     raw = path.read_text(encoding="utf-8")
     assert raw.count("\n") == 1
     assert len(raw.splitlines()) == 2
+
+
+def test_build_csv_survives_a_unicode_line_separator(tmp_path, monkeypatch):
+    """The regression has to be tested through ``build_csv``, not the helper.
+
+    An earlier version of this file tested ``read_records`` directly.  It passed
+    while ``build_csv`` still called ``splitlines()`` — so the fix looked done and
+    the cluster kept failing.  Test the entry point, not the piece underneath it.
+    """
+    from silicon_sampling.ccc import export as ex
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    note = f"first{LINE_SEPARATOR}second"
+    rows = [
+        {
+            "profile_id": f"c{i}",
+            "condition": "Control Neckties",
+            "answers": {"Concern_Post_1": 50, "note": note},
+        }
+        for i in range(3)
+    ]
+    (run_dir / "answers.jsonl").write_text(
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ex, "samples_dir", lambda run: run_dir)
+
+    report = ex.build_csv("whatever")
+    assert report["rows"] == 3
