@@ -480,7 +480,14 @@ BEST_RANKERS = (
     # Pfänder run is also the noisiest in the set, so it enters at a cost: the
     # decorrelation is worth x1.110 and the reliability loss x0.982, netting
     # x1.090.  Two more Muse seeds would remove most of that cost.
+    #
+    # **They landed.**  Muse now contributes three independent draws like the
+    # Qwens, so its noise divides by three in the model-balanced average instead
+    # of entering undivided, and the reliability cost of including it largely
+    # disappears.
     "muse_glimmer_30b",
+    "muse_glimmer_30b_seed2",
+    "muse_glimmer_30b_seed3",
 )
 
 #: The run three independent sources agree is closest to real response levels.
@@ -759,28 +766,31 @@ GLOBAL_SHRINK = 0.375
 EFFECT_VARIANCE = {
     "Qwen/Qwen2.5-7B": {"signal": 5.859, "noise": 1.069},
     "Qwen/Qwen2.5-72B": {"signal": 4.528, "noise": 1.550},
-    # Muse-Glimmer has one Pfänder draw, so the replicate route cannot reach it.
-    # These come from the standard errors instead -- ``noise = mean(se^2)``,
-    # ``signal = var(estimate) - noise`` -- which is a different estimator, not a
-    # guess.  Checked against the replicate route on the two models that have
-    # both: reliability 0.834 vs 0.846 for Qwen2.5-7B and 0.760 vs 0.745 for
-    # Qwen2.5-72B.  Muse's own reliability comes out 0.580, much the noisiest run
-    # in the set, which is why adding it costs as well as buys.
-    "meta-models/Muse-Glimmer-30B": {"signal": 2.370, "noise": 1.717},
+    # Measured from three independent Muse draws, the same replicate route as the
+    # Qwens.  **This replaces a standard-error estimate that was badly wrong.**
+    # With one draw the only available route was ``noise = mean(se^2)``, which put
+    # Muse's reliability at 0.580 -- the noisiest run in the set.  The replicate
+    # route puts it at 0.769.  The SE route over-stated Muse's noise roughly
+    # twofold because it charges *all* within-arm spread to sampling: Muse is far
+    # more deterministic per respondent than the Qwens (its seed replicates agree
+    # on 14.8% of scored cells and correlate +0.42 per respondent, against 9-12%
+    # and 0.01-0.08 for a Qwen pair), so much of that spread is reproducible
+    # rather than noise.  A model that answers consistently looks noisy to an
+    # estimator that reads consistency as variance.
+    "meta-models/Muse-Glimmer-30B": {"signal": 2.912, "noise": 0.873},
 }
 
 #: Covariance of two models' *true* effect vectors, keyed by the unordered pair.
 #: 3.606 corresponds to a true cross-model correlation of +0.700 -- against +0.713
 #: obtained independently by disattenuating the observed cross-correlation.
-#: Two models' sampling noises are independent, so the *observed* covariance of
-#: their effect vectors already is the covariance of their true effects and needs
-#: no disattenuation.  Measured that way the Qwen pair comes out 3.606, matching
-#: the disattenuated figure to three decimals, which is what licenses using the
-#: direct route for the Muse pairs.
+#: All three pairs now come from the same disattenuated route, which needs a
+#: measured reliability on both sides and so became available for the Muse pairs
+#: only once its replicate seeds landed.  The single-draw figures they replace
+#: (2.777 and 2.171) rested on Muse's over-stated noise.
 EFFECT_COVARIANCE = {
-    frozenset({"Qwen/Qwen2.5-7B", "Qwen/Qwen2.5-72B"}): 3.606,
-    frozenset({"Qwen/Qwen2.5-7B", "meta-models/Muse-Glimmer-30B"}): 2.777,
-    frozenset({"Qwen/Qwen2.5-72B", "meta-models/Muse-Glimmer-30B"}): 2.171,
+    frozenset({"Qwen/Qwen2.5-7B", "Qwen/Qwen2.5-72B"}): 3.604,
+    frozenset({"Qwen/Qwen2.5-7B", "meta-models/Muse-Glimmer-30B"}): 2.129,
+    frozenset({"Qwen/Qwen2.5-72B", "meta-models/Muse-Glimmer-30B"}): 1.797,
 }
 
 

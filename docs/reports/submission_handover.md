@@ -1,3 +1,8 @@
+> **Superseded** by [submission_now.md](submission_now.md), rebuilt after two more
+> Muse-Glimmer seeds and a CCC run of DeepSeek-V4-Flash landed. The prediction
+> files and their fingerprints changed; the structural half of the recipe is now
+> cross-validated, which it was not when this was written.
+
 # Pfänder submission — what is built, and what you still have to do
 
 [← back to the final report](README.md) · method:

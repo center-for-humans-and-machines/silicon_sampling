@@ -57,7 +57,11 @@ from silicon_sampling.ccc import score as SCORE
 
 warnings.filterwarnings("ignore")
 
-RUNS = ("qwen25_7b", "qwen25_72b", "muse_glimmer_30b")
+#: Every model with a CCC sample.  ``v4_flash`` joined last and matters most:
+#: it is the run the shipped entry takes its levels, demographic offsets and
+#: residual spread from, and until its CCC sample existed the structural half of
+#: the recipe could not be graded out of sample at all.
+RUNS = ("qwen25_7b", "qwen25_72b", "muse_glimmer_30b", "v4_flash")
 
 #: Half-split seed, matching ``benchmark.reference.half_split`` so the human
 #: ceiling reported here is the same split the cross-validation uses.

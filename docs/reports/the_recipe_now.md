@@ -14,8 +14,8 @@ match a real megastudy that has not yet been unblinded.
 | **Approach** | Behavioural cloning: base LLMs answer the real questionnaire as sampled respondents |
 | **Submission** | 18,000 individual-level synthetic respondents × 33 columns |
 | **Key design choice** | One respondent's answer is assembled from **four different models**, each supplying the one term it is best at |
-| **Validated on** | 4 published megastudies, 52,652 real respondents, held out one at a time |
-| **Expected score** | Pooled *r* ≈ **0.33** on effect recovery (95% CI ≈ ±0.13); a fresh half-sample of real humans scores 0.55 on the same task |
+| **Validated on** | 4 published megastudies, 52,652 real respondents, held out one at a time — **all four terms, including the structural donor** |
+| **Expected score** | Pooled *r* ≈ **0.34** on effect recovery (95% CI ≈ ±0.13); a fresh half-sample of real humans scores 0.54 on the same task |
 
 ---
 
@@ -91,7 +91,7 @@ themselves the models produce 0.8% of respondents under \$30,000 where the real
 population has 13.5%, which starves the demographic analyses of cases.
 
 **Condition effects** — the term the leaderboard sorts on. We average the effect
-vectors of **eight sampling runs across three models** (Qwen2.5-7B, Qwen2.5-72B,
+vectors of **ten sampling runs across three models** (Qwen2.5-7B, Qwen2.5-72B,
 Muse-Glimmer-30B), averaging *within* a model first and then across models, so
 each model carries equal weight regardless of how many runs of it exist.
 DeepSeek-V4-Flash is excluded from this term only.
@@ -106,7 +106,7 @@ single model of the three and still improves the average.
 Two shrinkage steps follow. Each intervention's effect is pulled halfway toward
 its own outcome's mean effect (**within-outcome shrinkage, 0.5**), because we
 predict *which outcomes move* far better than *which message moves them*. Then
-every effect is multiplied by a global factor (**0.383**), which is provably
+every effect is multiplied by a global factor (**0.400**), which is provably
 neutral on the correlation — a positive scalar cannot move a correlation — but is
 most of the story for error magnitude and calibration slope.
 
@@ -136,7 +136,7 @@ distributional metrics without moving the sort key.
 | term | source | graded against |
 | --- | --- | --- |
 | rows and demographics | Qwen2.5-7B, quota demographics | — |
-| condition effect | 8 runs / 3 models, averaged, shrunk twice | human treatment effects |
+| condition effect | 10 runs / 3 models, averaged, shrunk twice | human treatment effects |
 | level | DeepSeek-V4-Flash; 8 of 13 pinned to external anchors | human control-arm means |
 | demographic offset | DeepSeek-V4-Flash; party blended 70% to anchors | human group means, parity |
 | residual | DeepSeek-V4-Flash, rescaled to human dispersion | distribution shape |
@@ -174,24 +174,45 @@ Effect recovery, averaged over four held-out studies and eight splits:
 | | pooled *r* |
 | --- | --- |
 | **the method above** | **0.35** |
+| membership decided by a rule per fold instead of fixed | 0.32 |
 | the same without the third model | 0.31 |
+| every free choice refitted per fold | 0.29 |
 | best single model, uncalibrated | 0.26 |
-| *human replication reference* | *0.55* |
+| the structural donor, scored on effects | −0.00 |
+| *human replication reference* | *0.54* |
 
-The calibrated method beats every raw single model in **8 of 8 splits**. Its
-advantage over a single model — about +0.10 — is roughly a fifth of the way from
-a raw model to a fresh human sample.
+The calibrated method beats every raw single model in 8 of 8 splits. The last two
+rows are the design in miniature: the model that supplies three of the four terms
+is worthless at the fourth, and the method works by never asking it.
+
+**The structural half is now validated too**, which it was not before — the
+donor had no sample on one of the four studies, so the fold search could not
+consider it. It has one now, the search picks it on every fold, and the
+distributional metrics roughly halve their distance to the human reference:
+
+| control-arm distribution | fitted donor before | **now** | *human reference* |
+| --- | --- | --- | --- |
+| OVL | 0.663 | **0.784** | *0.859* |
+| KS | 0.277 | **0.150** | *0.041* |
+| W1 | 12.97 | **6.21** | *1.45* |
+| variance ratio | 0.968 | **1.023** | *1.008* |
+| demographic baseline RMSE | 11.36 | **6.04** | *2.03* |
+| demographic parity gap | 7.35 | **3.43** | *1.66* |
+
+Those earlier figures were not the method scoring badly; they were a different
+donor being scored in its place.
 
 ## 5. Expected performance, and what dominates the uncertainty
 
-**Pooled *r* ≈ 0.33**, with a 95% cluster-bootstrap interval of about **±0.13**.
+**Pooled *r* ≈ 0.34**, with a 95% cluster-bootstrap interval of about **±0.13**.
 
-Two adjustments separate the validation number from the prediction, and both are
-measured rather than assumed. The validation studies give one sampling run per
-model where the submission averages eight, which makes the submission's effect
-vector *less* noisy and its correlation correspondingly higher. Against that, the
-third model enters the submission with a single run and undiminished noise, which
-gives back part of the gain. Net, these very nearly cancel.
+One measured adjustment separates the validation number from the prediction. The
+validation studies give one sampling run per model; the submission averages ten,
+which makes its effect vector less noisy and its correlation correspondingly
+higher. Both reliabilities are measured from the fits' own standard errors —
+0.923 across the folds, 0.964 on the submission — and correlations scale as the
+square root of the ratio, so the bridge is **×1.022**. It carries a basis of 0.32
+to 0.33 and the fixed three-model row of 0.35 to 0.36.
 
 **What dominates is neither.** The same method scores 0.01 on one validation study
 and 0.46 on another. That eightfold spread is larger than every design choice in
@@ -208,17 +229,12 @@ one, and it is why the interval above is wide.
 
 ## 6. Known limitations
 
-**Three quarters of the benchmark rests on a component that could not be
-cross-validated.** The structural donor — the model supplying levels, demographics
-and dispersion — is DeepSeek-V4-Flash, and it has no sample on one of the four
-validation studies. The fold search therefore cannot even consider it, so every
-distributional and demographic result in the validation describes a donor the
-submission does not use.
-
-**Subgroup effects are the weakest prediction.** Across four held-out studies the
-method recovers condition × moderator interactions at *r* ≈ −0.08. The consolation
-is that the human replication reference on the same task is only +0.07: at these
-cell sizes a fresh human sample barely predicts the other half either.
+**Subgroup effects remain the weakest prediction.** Across four held-out studies
+the method recovers condition × moderator interactions at *r* ≈ −0.01 — better
+than the −0.08 measured before the structural donor could be validated, but still
+no better than predicting no heterogeneity at all. The consolation is that the
+human replication reference on the same task is only +0.07: at these cell sizes a
+fresh human sample barely predicts the other half either.
 
 **Two validation studies carry known instrument-rendering defects** that would
 require re-sampling to fix — one where slider ranges were never shown to the
@@ -227,9 +243,14 @@ constraint. The second was repaired in analysis by renormalising to the budget
 the real instrument enforced; the first cannot be repaired and is a reason to
 distrust that study's level metrics.
 
-**One shrinkage constant is untested for the donor that uses it.** The dispersion
-rescale was fitted on an external survey for DeepSeek-V4-Flash, and the one study
-that could test it out-of-sample is the study V4-Flash has no run on.
+**The dispersion rescale is the one constant the new evidence argues against.**
+It is 1.12, fitted so the built entry's control-arm spread matches the external
+dispersion targets, which it does almost exactly (ratio 1.008 against 0.941 at
+1.00). But the donor's spread can now be graded directly against a held-out
+study's humans, and there it is already right untouched (ratio 1.028) — applying
+1.12 pushes it to 1.103 and costs OVL, KS and W1. Two external references
+disagree because they are different instruments; the Pfänder-specific one is
+kept, and this is the least secure constant in the recipe.
 
 ---
 
