@@ -65,8 +65,28 @@ def load_humans() -> pd.DataFrame:
     return frame.reset_index(drop=True)
 
 
+def pool_controls(frame: pd.DataFrame) -> pd.DataFrame:
+    """Collapse the three placebo arms into one ``Control``, wherever they appear.
+
+    ``load_humans`` does this for the human side, and a silicon sample arrives with
+    the raw labels — so ``effects`` has to do it for both or the two sides carry
+    different condition vocabularies. Left undone, the OLS design matrix halts
+    because its reference level is missing, which is how this was caught; a
+    scorer that quietly dropped the reference instead would have compared a
+    treatment against nothing.
+    """
+    if "condition" not in frame.columns:
+        return frame
+    out = frame.copy()
+    out["condition"] = np.where(
+        out["condition"].isin(inst.CONTROL_ARMS), CONTROL, out["condition"]
+    )
+    return out
+
+
 def effects(frame: pd.DataFrame) -> pd.DataFrame:
     """Simple ATEs per outcome, in pp of scale range — the benchmark's estimand."""
+    frame = pool_controls(frame)
     present = {k: v for k, v in oc.SCORED.items() if k in frame.columns}
     return treatment_effects(frame, present, control=CONTROL)
 
@@ -81,6 +101,7 @@ def effects_ancova(frame: pd.DataFrame) -> pd.DataFrame:
     """
     from ..analysis.ols import design_matrix, ols
 
+    frame = pool_controls(frame)
     rows = []
     for outcome, scale in oc.SCORED.items():
         pre = outcome.replace("_Post", "_Pre")

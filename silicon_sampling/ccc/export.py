@@ -50,6 +50,22 @@ def build_frame(records) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def read_records(path):
+    """One JSON record per line, splitting on newlines and nothing else.
+
+    ``str.splitlines()`` is the obvious way to write this and it is wrong here: it
+    also breaks on U+2028, U+2029, VT, FF and NEL. Model free text contains them —
+    this run held six U+2028 LINE SEPARATORs — so ``splitlines()`` cut six records
+    in half and JSON parsing died with "Unterminated string" on a file that was
+    perfectly well formed. Iterating the handle splits on newlines only.
+    """
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            line = line.rstrip("\n")
+            if line.strip():
+                yield json.loads(line)
+
+
 def build_csv(run: str) -> dict:
     """Read one run's answers and write its analysis frame."""
     out_dir = samples_dir(run)
