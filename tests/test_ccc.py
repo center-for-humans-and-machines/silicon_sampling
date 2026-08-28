@@ -65,3 +65,40 @@ def test_build_csv_survives_a_unicode_line_separator(tmp_path, monkeypatch):
 
     report = ex.build_csv("whatever")
     assert report["rows"] == 3
+
+
+def test_ancova_runs_and_buys_the_precision_it_exists_to_measure():
+    """``effects_ancova`` had four bugs and had never once been executed.
+
+    It was written to sit beside :func:`effects` so the gap between the two could
+    be read as "how much precision the pre-measure buys". Nothing called it, no
+    test touched it, and it was broken in four independent ways: it passed a
+    ``numeric=`` argument ``design_matrix`` has never accepted; it read
+    ``term.estimate`` where ``ols`` returns a plain dict; it let ``Donation`` --
+    which has no ``_Post`` in its name and no pre-measure -- resolve ``pre`` to the
+    outcome itself, duplicating a column and making ``y`` two-dimensional; and it
+    omitted the ``n`` column ``ate_pairs`` merges on.
+
+    So this asserts the thing the function is *for*, not merely that it returns a
+    frame: the covariate has to reduce the standard errors. A version that fits
+    ``post ~ condition`` and ignores ``pre`` would return a perfectly well-formed
+    frame and fail here.
+    """
+    from silicon_sampling.ccc import score as cs
+
+    humans = cs.load_humans()
+    simple = cs.effects(humans)
+    ancova = cs.effects_ancova(humans)
+
+    assert not ancova.empty
+    assert {"outcome", "condition", "n", "estimate", "se"} <= set(ancova.columns)
+    assert "Donation" not in set(ancova["outcome"]), "Donation has no pre-measure"
+
+    keys = ["outcome", "condition"]
+    both = simple.merge(ancova, on=keys, suffixes=("_simple", "_ancova"))
+    assert len(both) > 50
+    # The pre-measure explains a large share of between-person variance on these
+    # outcomes, so the standard errors should roughly halve.  A loose bound: the
+    # covariate must cut the median SE by at least a quarter.
+    ratio = (both["se_ancova"] / both["se_simple"]).median()
+    assert ratio < 0.75, f"the covariate bought no precision (SE ratio {ratio:.3f})"

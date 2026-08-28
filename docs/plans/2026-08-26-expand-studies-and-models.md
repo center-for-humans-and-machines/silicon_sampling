@@ -125,13 +125,13 @@ Things that become possible, to be tested rather than assumed:
       is known, not just its mean and sd — so our answers can be mapped onto it.
       This is the first calibration available that could move OVL, KS and W1
       directly rather than through a variance ratio
-- [ ] G4. Effect-magnitude prior: mean absolute human effect is 1.70 pp across
+- [x] G4. Effect-magnitude prior: mean absolute human effect is 1.70 pp across
       CCC's ten framings, the closest analogue to Pfänder, which should narrow the
       `rmse`, `alpha` and `beta` predictions
-- [ ] G5. **Arm-level effect anchor.** Pfänder has a `Consensus` condition and CCC
+- [x] G5. **NEGATIVE — same name, different manipulation.** Arm-level effect anchor: Pfänder has a `Consensus` condition and CCC
       has `Consensus Framing 1` and `2`. Check whether any Pfänder arm matches a
       CCC arm closely enough to anchor a single condition effect directly
-- [ ] G6. Pre-post structure: CCC measures outcomes before and after. Check what
+- [x] G6. **No scoring consequence** (only 2 of 13 outcomes are measured twice and neither pre-measure is submitted), but it explains the CCC ceiling. Pre-post structure: CCC measures outcomes before and after. Check what
       the human pre-post relationship says about plausible effect sizes, and
       whether Pfänder's design supports the same
 
@@ -164,4 +164,4 @@ ensemble at all).
 
 **Remaining:** E4 revise the prediction; F1/F2 re-run the CV after V4 lands and
 rebuild if constants move; the Muse membership decision once its seeds are in;
-G5 and G6.
+nothing in G — G1–G6 are all resolved.

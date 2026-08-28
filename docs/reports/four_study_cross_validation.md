@@ -12,10 +12,10 @@ because the design was motivated by the same three studies it was scored on.
 This adds a fourth study (Voelkel et al. 2026, the Climate Change Challenge) and
 a fourth model (Muse-Glimmer-30B), and asks the same questions again.
 
-Four things came out of it. Two are results, one is a defect this found in the
-shipped ensemble, and one is a set of calibrations that were tried and do not
-work. The defect is the most consequential and it is in
-[its own section](#the-eighth-run-was-not-a-run).
+Five things came out of it: two results, a defect this found in the shipped
+ensemble, a set of calibrations that were tried and do not work, and an
+explanation of why the new fold is so hard. The defect is the most consequential
+and it is in [its own section](#4-the-eighth-run-was-not-a-run).
 
 ## 1. The fourth study
 
@@ -28,7 +28,9 @@ verbatim identical, and three of six behavioural-intention items are.
 It is also, by a wide margin, the **hardest fold**. Splitting CCC's own
 participants in half and predicting one half's arm effects from the other's
 reaches only r = 0.372, against 0.514–0.642 on the other three studies. Whatever
-a model scores there is measured against a much lower ceiling.
+a model scores there is measured against a much lower ceiling — and
+[§6](#6-why-cccs-ceiling-is-low-and-two-anchors-that-looked-free) shows that
+ceiling is a measurement-precision limit rather than an absence of effects.
 
 ## 2. Effect recovery, four folds
 
@@ -237,6 +239,69 @@ the mass sitting in it is worth about half a dollar of the mean. The recipient
 differs in kind too — an unnamed advocacy organisation against the American
 Meteorological Society — and the authors disclaim level representativeness for
 their sample. The anchor stays `construct-only` and unused.
+
+## 6. Why CCC's ceiling is low, and two anchors that looked free
+
+### The ceiling is a precision limit, not an absence of effects
+
+CCC measures every outcome before *and* after treatment, so the same arm effects
+can be estimated twice: by the simple ATE the benchmark uses, and by the ANCOVA
+the published paper uses. Splitting CCC's participants in half and predicting one
+half from the other, both ways:
+
+| estimand | pairs | median SE (pp) | mean \|effect\| (pp) | **replication r** |
+| --- | --- | --- | --- | --- |
+| simple ATE, `post ~ condition` | 81 | 1.000 | 1.46 | **0.372** |
+| ANCOVA, `post ~ condition + pre` | 72 | 0.421 | 1.17 | **0.624** |
+
+The pre-measure cuts the standard errors by 58% and lifts the ceiling from 0.372
+to 0.624 — into the range of the other three studies. **CCC's interventions are
+not unusually ineffective; they are unusually badly measured by the estimand the
+benchmark uses.**
+
+That reframes the CCC fold. Our 0.13 there is not evidence of a model failing on
+climate framing; it is a fold where the *target* is mostly noise. And it is the
+right fold to keep, because Pfänder is scored the same way — `lm(outcome ~
+condition)` with HC2 and no covariate. If Pfänder's outcomes are as noisy
+per-person as CCC's, its ceiling will be low too, and low for every entry on the
+leaderboard rather than only for ours.
+
+Getting this number required fixing `effects_ancova`, which had been written to
+supply exactly this comparison and **had never once been run**. It was broken four
+ways: a `numeric=` argument `design_matrix` has never accepted, an attribute read
+on what `ols` returns as a dict, a missing `n` column that `ate_pairs` merges on,
+and `Donation` — which has no `_Post` in its name — resolving its own pre-measure
+to itself, duplicating a column and making the response two-dimensional. There is
+now a test, and it asserts the covariate *buys precision* rather than merely that
+a frame comes back; a version ignoring the covariate scores an SE ratio of 1.000
+against the required 0.75.
+
+### The Consensus arms share a name, not a manipulation
+
+Pfänder has a `Consensus` condition and CCC has `Consensus Framing 1` and `2`, so
+an arm-level effect anchor looked available. Reading both stimuli, it is not.
+
+CCC's are one-directional consensus messaging: a debunking of the "Petition
+Project" ending on "97% of actual climate scientists agree", and a straight
+statement that "at least 98 out of 100 agree". Pfänder's is an
+**estimate-then-correct** design aimed at trust rather than belief: the respondent
+first guesses what share of scientists agree with three statements, then sees the
+real figures — 99%, ~100%, and **66%** for reaching net-zero before 2085 — under
+a preamble saying that disagreement "is not a weakness but a fundamental part of
+how science progresses". One arm asserts consensus; the other deliberately shows
+where consensus runs out.
+
+The magnitudes settle it anyway. CCC's Consensus arms move the five shared
+outcomes by 0.65 to 3.06 pp, against a between-arm effect spread of 1.34 pp
+across the whole study. Anchoring one Pfänder cell to a ~1 pp effect from a
+different manipulation would import less signal than the noise it carries.
+
+### The pre-post structure has no scoring consequence
+
+Pfänder measures only two of its thirteen outcomes twice — `trust_pre`/`trust_post`
+and `belief_pre`/`belief_post` — and the submission's 33 columns contain neither
+pre-measure. The benchmark's estimand has no covariate slot. So the ANCOVA gain
+above is a fact about interpreting CCC, not a lever on Pfänder.
 
 ## What this changes for the Pfänder prediction
 

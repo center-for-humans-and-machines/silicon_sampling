@@ -105,7 +105,11 @@ def effects_ancova(frame: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for outcome, scale in oc.SCORED.items():
         pre = outcome.replace("_Post", "_Pre")
-        if outcome not in frame.columns or pre not in frame.columns:
+        # ``Donation`` has no pre-measure and no ``_Post`` in its name, so the
+        # substitution returns the outcome itself.  Left unguarded, the frame gets
+        # a duplicated column, ``data[outcome]`` comes back two-dimensional, and
+        # the OLS fails on a broadcast deep inside the HC2 weights.
+        if pre == outcome or outcome not in frame.columns or pre not in frame.columns:
             continue
         data = frame[["condition", outcome, pre]].dropna()
         if data.empty or data["condition"].nunique() < 2:
@@ -113,19 +117,28 @@ def effects_ancova(frame: pd.DataFrame) -> pd.DataFrame:
         X, names = design_matrix(
             {"condition": data["condition"].tolist()},
             reference={"condition": CONTROL},
-            numeric={pre: data[pre].to_numpy(dtype=float)},
         )
+        # ``design_matrix`` builds an intercept plus dummies and knows nothing
+        # about continuous regressors, so the covariate is appended here rather
+        # than passed in.  An earlier version passed ``numeric=`` and had never
+        # been run; see ``test_ccc_ancova_actually_runs_and_buys_precision``.
+        X = np.column_stack([X, data[pre].to_numpy(dtype=float)])
+        names = list(names) + [pre]
         fit = ols(X, data[outcome].to_numpy(dtype=float), names, robust="HC2")
         for name in names:
             if name == "(Intercept)" or not name.startswith("condition["):
                 continue
             term = fit.term(name)
+            arm = name[len("condition") + 1 : -1]
             rows.append(
                 {
                     "outcome": outcome,
-                    "condition": name[len("condition") + 1 : -1],
-                    "estimate": term.estimate / scale * 100,
-                    "se": term.se / scale * 100,
+                    "condition": arm,
+                    # ``n`` is what ``ate_pairs`` merges on alongside the estimate,
+                    # so omitting it made every downstream comparison a KeyError.
+                    "n": int((data["condition"] == arm).sum()),
+                    "estimate": term["estimate"] / scale * 100,
+                    "se": term["se"] / scale * 100,
                 }
             )
     return pd.DataFrame(rows)
