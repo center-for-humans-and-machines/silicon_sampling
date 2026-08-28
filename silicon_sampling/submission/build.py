@@ -200,6 +200,18 @@ def write_metadata(
     Patching is what ``make manifest`` does: the fingerprint block and the
     fields this builder owns are refreshed, and every other key a human edited
     is left exactly as it was.
+
+    **What the builder owns is what the recipe determines.**  ``models`` and
+    ``approach_family`` are read off the recipe — which runs it reads and how many
+    distinct models those are — so a stale copy of them is simply wrong, and
+    leaving them alone across a rebuild shipped a three-model hybrid describing
+    itself as ``single model`` with the wrong model list.  They are refreshed.
+
+    ``abstract`` is refreshed **only if the one on disk was generated here**,
+    detected by the ``Configuration:`` line this builder appends.  A team that
+    writes its own abstract keeps it; the deposit's Zenodo description is built
+    from that field, so clobbering a hand-written one would be worse than leaving
+    a stale generated one.
     """
     path = Path(out_dir) / "metadata.json"
     document = meta.to_json(prediction_files)
@@ -214,8 +226,18 @@ def write_metadata(
                     "entry": document["entry"],
                     "prediction_files": document["prediction_files"],
                     "coverage": document["coverage"],
+                    "models": document["models"],
+                    "approach_family": document["approach_family"],
                 }
             )
+            # "Generated here" is detected by the recipe-describe marker, which
+            # every builder-written abstract carries in one format or another
+            # ("[effects=" appears in R.describe's output).  A hand-written
+            # abstract has no reason to contain it and is left alone.
+            previous = str(existing.get("abstract") or "")
+            generated = "[effects=" in previous or "Configuration:" in previous
+            if not previous.strip() or generated:
+                merged["abstract"] = document["abstract"]
             document = merged
     # ensure_ascii=False: jsonlite writes UTF-8, and a team name or affiliation
     # with a non-ASCII character has to stay readable in the deposited file.

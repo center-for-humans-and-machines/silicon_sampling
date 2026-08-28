@@ -73,12 +73,19 @@ ANCHORS = (
     ),
     Anchor(
         "policy_general",
-        "Policies_Post",
+        # ``Policies_Post_3``, not the ``Policies_Post`` composite.  Pfänder asks
+        # one item; CCC's composite averages it with two that ask about
+        # greenhouse-gas emissions (Q17) and energy efficiency (Q18).  Those are
+        # different questions and they behave differently -- the D-R party gap
+        # runs 35.6 / 25.8 / 37.3 across the three, so averaging them understates
+        # the polarisation on the item Pfänder actually reuses.  Q19 is the
+        # verbatim match and is the only one of the three this anchor may use.
+        "Policies_Post_3",
         "identical",
-        68.01,
-        29.32,
-        32.9,
-        "'The U.S. government should do more to reduce global warming' verbatim",
+        65.88,
+        32.89,
+        37.34,
+        "CCC Q19, 'The U.S. government should do more to reduce global warming'",
     ),
     Anchor(
         "behavior_mean",
@@ -169,7 +176,21 @@ def measure() -> "pd.DataFrame":
         if column not in control.columns:
             continue
         values = pd.to_numeric(control[column], errors="coerce")
-        scale = co.SCORED[column]
+        # An anchor may name a single *item* rather than a scored composite --
+        # ``policy_general`` does, because Pfänder reuses one of the three items
+        # CCC averages into ``Policies_Post`` and averaging in the other two
+        # understates its polarisation.  An item carries its composite's scale.
+        scale = co.SCORED.get(column)
+        if scale is None:
+            parent = next(
+                (name for name, (items, _) in co.COMPOSITES.items() if column in items),
+                None,
+            )
+            if parent is None:
+                raise KeyError(
+                    f"{column!r} is neither a scored CCC outcome nor an item of one"
+                )
+            scale = co.COMPOSITES[parent][1]
         democrat = values[control["party"] == "Democrat"]
         republican = values[control["party"] == "Republican"]
         rows.append(

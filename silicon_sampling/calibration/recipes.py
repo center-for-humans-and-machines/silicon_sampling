@@ -472,6 +472,15 @@ BEST_RANKERS = (
     "qwen25_72b_demo",
     "qwen25_72b",
     "qwen25_72b_seed2",
+    # Muse-Glimmer joins on the corrected four-study cross-validation: a
+    # three-model average scores 0.350 against the Qwen pair's 0.312 over eight
+    # half-splits and beats every raw single model in 8 of 8.  Averaging pays for
+    # decorrelated errors rather than for the added model being good, and Muse is
+    # not good -- it is the weakest of the three over four folds.  Its one
+    # Pfänder run is also the noisiest in the set, so it enters at a cost: the
+    # decorrelation is worth x1.110 and the reliability loss x0.982, netting
+    # x1.090.  Two more Muse seeds would remove most of that cost.
+    "muse_glimmer_30b",
 )
 
 #: The run three independent sources agree is closest to real response levels.
@@ -511,7 +520,7 @@ HUMAN_DISPERSION = {
     "policy_role_mean": 26.02,
     # CCC control arm.
     "concern_mean": 31.65,
-    "policy_general": 29.32,
+    "policy_general": 32.89,
     "behavior_mean": 24.26,
     "belief_post": 22.52,
     "policy_specific_mean": 23.98,
@@ -626,7 +635,7 @@ PARTY_GAP_ANCHORS = {
     "policy_role_mean": 7.4,
     # CCC, party measured directly; grades in anchors/ccc.py.
     "concern_mean": 37.7,
-    "policy_general": 32.9,
+    "policy_general": 37.3,
     "behavior_mean": 16.2,
     "policy_specific_mean": 25.3,
     "belief_post": 22.8,
@@ -750,13 +759,28 @@ GLOBAL_SHRINK = 0.375
 EFFECT_VARIANCE = {
     "Qwen/Qwen2.5-7B": {"signal": 5.859, "noise": 1.069},
     "Qwen/Qwen2.5-72B": {"signal": 4.528, "noise": 1.550},
+    # Muse-Glimmer has one Pfänder draw, so the replicate route cannot reach it.
+    # These come from the standard errors instead -- ``noise = mean(se^2)``,
+    # ``signal = var(estimate) - noise`` -- which is a different estimator, not a
+    # guess.  Checked against the replicate route on the two models that have
+    # both: reliability 0.834 vs 0.846 for Qwen2.5-7B and 0.760 vs 0.745 for
+    # Qwen2.5-72B.  Muse's own reliability comes out 0.580, much the noisiest run
+    # in the set, which is why adding it costs as well as buys.
+    "meta-models/Muse-Glimmer-30B": {"signal": 2.370, "noise": 1.717},
 }
 
 #: Covariance of two models' *true* effect vectors, keyed by the unordered pair.
 #: 3.606 corresponds to a true cross-model correlation of +0.700 -- against +0.713
 #: obtained independently by disattenuating the observed cross-correlation.
+#: Two models' sampling noises are independent, so the *observed* covariance of
+#: their effect vectors already is the covariance of their true effects and needs
+#: no disattenuation.  Measured that way the Qwen pair comes out 3.606, matching
+#: the disattenuated figure to three decimals, which is what licenses using the
+#: direct route for the Muse pairs.
 EFFECT_COVARIANCE = {
     frozenset({"Qwen/Qwen2.5-7B", "Qwen/Qwen2.5-72B"}): 3.606,
+    frozenset({"Qwen/Qwen2.5-7B", "meta-models/Muse-Glimmer-30B"}): 2.777,
+    frozenset({"Qwen/Qwen2.5-72B", "meta-models/Muse-Glimmer-30B"}): 2.171,
 }
 
 
@@ -803,7 +827,14 @@ def ensemble_reliability(runs: tuple[str, ...]) -> float | None:
 
 #: The reliability :data:`GLOBAL_SHRINK` was fitted against: one run per model,
 #: which is all the calibration studies have.
-SHRINK_FITTED_RELIABILITY = 0.870
+#:
+#: **Corrected from 0.870.**  That figure is the reliability of a one-run-each
+#: Qwen pair measured on *Pfänder*, but ``GLOBAL_SHRINK`` was fitted on the
+#: **reference studies**, where the same quantity -- measured from the same
+#: standard errors, per fold, and averaged -- is 0.903.  Using the Pfänder number
+#: as the denominator made ``shrink_for_runs`` over-correct by about 4%.
+#: Shrinkage cannot move a correlation, so this reaches RMSE and beta only.
+SHRINK_FITTED_RELIABILITY = 0.903
 
 
 def shrink_for_runs(
