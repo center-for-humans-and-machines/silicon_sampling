@@ -4,7 +4,8 @@ Final report. The submission is three Tier-1 entries in
 `data/pfander/submission/{primary,secondary-1,secondary-2}`, each 18,000
 synthetic respondents × 33 columns, all passing the benchmark's validator.
 
-Sub-reports: [**the verified cross-validation and prediction**](four_study_cross_validation_verified.md) ·
+Sub-reports: [**the recipe I would ship today**](the_recipe_now.md) ·
+[**the verified cross-validation and prediction**](four_study_cross_validation_verified.md) ·
 [**every defect found**](audit_findings.md) ·
 [what to expect on Pfänder](prediction.md) ·
 [four studies, four models](four_study_cross_validation.md) ·
