@@ -154,8 +154,10 @@ Against an uncalibrated Qwen2.5-7B, counting how often each variant wins:
 **Every calibrated variant beats a raw single model on the split average**, and
 the ones with pre-committed structure beat it in 8 of 8 splits. The old report
 concluded the opposite about the fully-fitted variant, and that conclusion came
-entirely from seed 42's draw. This is a correction *in the recipe's favour* —
-the only one in this report that runs that way.
+entirely from seed 42's draw. This is the largest of the three corrections here
+that run *in the project's favour*, the others being the party-gap weight (which
+was too low, not too high) and the ANCOVA gain in §6 (which is bigger than
+reported, not smaller).
 
 Two things do survive unchanged. The membership **rules** are still the best
 variants and the most stable (sd 0.039–0.040, the smallest of any calibrated
