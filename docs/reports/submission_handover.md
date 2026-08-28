@@ -130,23 +130,60 @@ three entries are three directories, not three repos. For each:
 
 ## Two things I could not fix, which you should know before depositing
 
-### `gender = "Other"` has zero respondents
+### `gender = "Other"` has zero respondents — a conditional risk, not a defect
 
-The submission declares three gender levels and contains two. The census quota
-table has no target for "Other" — the benchmark's own preregistration says those
-participants are not quota-constrained — so our draw produces none, while a real
-US sample will contain some.
+The submission declares three gender levels and contains two. **This matches the
+published quota exactly**, and an earlier draft of this section was wrong to call
+it a gap in our sample.
 
-Consequence: **208 of the 1,248 subgroup interaction estimates** (one sixth of
-Section 2) are for a cell we have no respondents in. Depending on how the
-organizers' pipeline joins the human and submitted grids, those cells either drop
-silently or the join errors. Our own scorer raises on exactly this shape, which
-is how the equivalent problem was caught in one of the validation studies.
+The benchmark's quota table (preregistration, Table 2, N = 18,000) has only
+*Male* and *Female* columns, and the arithmetic leaves no room for a third
+category: Male + Female equals the cell total in **every one of the nine cells**,
+and the cells sum to exactly 18,000 on both the age and the race margin. Our draw
+reproduces it to the person — Male 8,827 against a quota of 8,827, Female 9,173
+against 9,173, race *Other* 492 against 492. Recruiting to that quota produces a
+sample with no gender-*Other* respondents at all.
 
-Fixing it means re-drawing profiles and re-sampling, which is new LLM inference
-and out of scope for this build. Every other moderator level is well populated —
-the next smallest is 381 respondents. **If you have any sampling budget before the
-deadline, this is where I would spend it**, ahead of the two Muse replicate seeds.
+Against that sit four places where the benchmark carries the level anyway: the
+preregistration's remark that such participants "are not quota-constrained"
+(which reads as *may participate without a quota limit* rather than *are
+excluded*), the submission spec's required levels
+`c("Male", "Female", "Other")`, the codebook's "Exact submission levels: Male |
+Female | Other", and — most tellingly — the organizers' own placeholder data
+generator, which simulates gender from three categories.
+
+**So the question is whether the realised human sample contains any, and that is
+locked data.** The consequence if it does is worse than a few lost cells:
+`build_subgroup_pairs` ends with
+
+```r
+stopifnot(nrow(joined) == nrow(human_mod_side))
+```
+
+so a human-side interaction row with no counterpart in our refit **stops
+Section 2 for this submission** rather than silently shrinking it. Three branches:
+
+- humans have **none** → both sides carry two levels, the join matches, nothing
+  happens. The quota arithmetic makes this the most likely branch.
+- humans have **a handful** → most condition × *Other* cells are empty, those
+  coefficients are aliased and dropped on the human side too, and the join
+  probably still matches.
+- humans have **enough to identify the interactions** (~1% of a US panel would be
+  ~180 people, ~10 per condition) → the human side carries the rows, ours does
+  not, and the assertion fails.
+
+**Insurance, if you want it.** Sampling ~200 additional respondents with
+gender = *Other* — about 1% of the sample, ~11 per condition — into the template
+run and the structural donor run would remove the third branch entirely. At the
+observed throughput that is well under an hour of GPU time against the ~78
+GPU-hours already spent. It would put our sample slightly *off* the published
+quota, which is the trade: exact quota conformance against immunity to a join
+that may or may not fail.
+
+I would not treat this as urgent. It is worth knowing before depositing, and it
+is worth one email to the organizers asking whether the human data contain
+gender-*Other* respondents — a question they can answer without unblinding any
+outcome.
 
 ### The structural half of the recipe is validated on three studies, not four
 
