@@ -100,9 +100,7 @@ def load(study: F.FoldStudy) -> dict:
             .dropna(subset=["estimate_h", "estimate_l"])
             .set_index(["outcome", "condition"])
         )
-        controls[run] = sample[
-            sample["condition"].astype(str) == study.design.control
-        ]
+        controls[run] = sample[sample["condition"].astype(str) == study.design.control]
     index = None
     for frame in pairs.values():
         index = frame.index if index is None else index.intersection(frame.index)
@@ -112,7 +110,9 @@ def load(study: F.FoldStudy) -> dict:
     ).dropna(subset=["estimate_h", "estimate_l"])
     # The ceiling has to be measured on the pairs the models are measured on, or
     # it is a different question answered on a different grid.
-    replication = replication.set_index(["outcome", "condition"]).loc[index].reset_index()
+    replication = (
+        replication.set_index(["outcome", "condition"]).loc[index].reset_index()
+    )
     return {
         "study": study,
         "cfg": {"name": study.name, "scales": dict(study.design.outcomes)},
@@ -371,9 +371,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     pd.set_option("display.width", 250)
-    data = {
-        study.name: load(study) for study in F.load_folds(args.studies or None)
-    }
+    data = {study.name: load(study) for study in F.load_folds(args.studies or None)}
     names = list(data)
 
     # A run is a candidate only where every study has it.  Report the exclusions:
@@ -522,7 +520,9 @@ def main(argv: list[str] | None = None) -> int:
     print(
         "=== what the training folds chose, never having seen the held-out study ===\n"
     )
-    print(pd.DataFrame(chosen).to_string(index=False, float_format=lambda v: f"{v:.3f}"))
+    print(
+        pd.DataFrame(chosen).to_string(index=False, float_format=lambda v: f"{v:.3f}")
+    )
 
     table = pd.DataFrame(rows)
     s1 = [

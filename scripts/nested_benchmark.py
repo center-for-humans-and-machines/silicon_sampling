@@ -101,7 +101,12 @@ SECTION1 = (
     "alpha",
     "beta",
 )
-SECTION2 = ("sub_pearson_r", "sub_spearman_rho", "sub_directional_pct", "sub_pearson_adj")
+SECTION2 = (
+    "sub_pearson_r",
+    "sub_spearman_rho",
+    "sub_directional_pct",
+    "sub_pearson_adj",
+)
 SECTION3 = ("variance_ratio", "ovl", "ks", "w1")
 SECTIONS_10_12 = (
     "baseline_rmse",
@@ -130,9 +135,7 @@ class Fold:
             if key is None:
                 continue
             self.runs[run] = study.prepare(
-                pd.read_csv(
-                    study.samples_dir(key) / "samples.csv", low_memory=False
-                )
+                pd.read_csv(study.samples_dir(key) / "samples.csv", low_memory=False)
             )
         if subgroups:
             self.design = self._restrict_moderators()
@@ -238,9 +241,7 @@ def fit_effect_side(
             if best is None or r > best[0]:
                 best = (r, membership, within)
     _, membership, within = best
-    frame = pd.concat(
-        [f.vector(membership, within) for f in train], ignore_index=True
-    )
+    frame = pd.concat([f.vector(membership, within) for f in train], ignore_index=True)
     human = frame["estimate_h"].to_numpy()
     ours = frame["estimate_l"].to_numpy()
     kappa = float(np.cov(human, ours, ddof=1)[0, 1] / np.var(ours, ddof=1))
@@ -255,9 +256,7 @@ def fit_kappa(train: list[Fold], membership: tuple[str, ...], within: float) -> 
     )
 
 
-def fit_structure(
-    train: list[Fold], available: tuple[str, ...]
-) -> tuple[str, float]:
+def fit_structure(train: list[Fold], available: tuple[str, ...]) -> tuple[str, float]:
     """Structural donor and residual scale, on the training studies' control arms.
 
     The residual scale is the factor that puts the donor's within-arm dispersion
@@ -466,7 +465,9 @@ def main(argv: list[str] | None = None) -> int:
             }
         )
 
-    print("=== what the training folds chose, never having seen the held-out study ===\n")
+    print(
+        "=== what the training folds chose, never having seen the held-out study ===\n"
+    )
     print(pd.DataFrame(chosen).to_string(index=False))
 
     table = pd.DataFrame(rows)
@@ -487,9 +488,9 @@ def main(argv: list[str] | None = None) -> int:
 
     print("\n\n=== per fold, sort key only ===\n")
     print(
-        table.pivot_table(index="what", columns="held out", values="pearson_r").to_string(
-            float_format=lambda v: f"{v:7.3f}"
-        )
+        table.pivot_table(
+            index="what", columns="held out", values="pearson_r"
+        ).to_string(float_format=lambda v: f"{v:7.3f}")
     )
     if "_missing" in table.columns and table["_missing"].notna().any():
         print("\nmissing leaderboard keys:", sorted(set(table["_missing"].dropna())))

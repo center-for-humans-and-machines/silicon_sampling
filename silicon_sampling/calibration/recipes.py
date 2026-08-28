@@ -642,18 +642,44 @@ PARTY_GAP_ANCHORS = {
 #: measured distance to the anchors from RMSE 7.4 pp to about 3.7 while leaving
 #: the model's own topic ordering, which is already right (r = +0.835), intact.
 #:
-#: **Re-examined once CCC replaced six of the nine anchors with direct party
-#: measurements, and kept.**  The stated reason above no longer covers those six,
-#: so the question became quantitative.  Five outcomes now carry two independent
-#: estimates of the same gap -- the pre-CCC proxy and CCC's measurement -- and
-#: they disagree by an RMS of 9.07 pp, putting about 6.4 pp of error on a single
-#: anchor against the donor's own 3.6 pp.  Inverse-variance weighting on those
-#: numbers gives 0.24, not more than 0.5.  That is a lower bound: four of the five
-#: disagreements run the same way, so much of the 9.07 is bias in the old CCAM
-#: values (shrunk by a judgement factor of 0.6 that was too aggressive) rather
-#: than noise in the new ones, and charging it to CCC instead moves the optimum to
-#: about 0.6.  The defensible range is 0.24 to 0.6 and this sits inside it.
-PARTY_GAP_WEIGHT = 0.5
+#: **Raised from 0.5 to 0.7 once the weight was measured out of sample rather
+#: than argued from a decomposition.**
+#:
+#: The argument this replaces went: the pre-CCC proxy and CCC's measurement of the
+#: same five gaps disagree by an RMS of 9.07 pp, so a single anchor carries about
+#: 6.4 pp of error; the donor sits 7.36 pp from "the anchors", so its own error is
+#: about 3.6 pp; inverse-variance weighting therefore puts 0.24 on the anchor and
+#: 0.5 is generous.  Two things are wrong with it.  The 7.36 is the donor's
+#: distance from the **pre-CCC** eight-anchor set, measured before CCC existed --
+#: against the shipped anchors it is 8.02, and against the six CCC-backed ones
+#: 6.03, which makes the implied donor variance *negative*.  And the same report
+#: measured the donor's party-gap error directly, two sections earlier, at 13.9 pp
+#: on CCC's held-out humans -- four times the 3.6 the subtraction inferred.
+#:
+#: So it was measured instead.  CCC can grade the blend honestly as long as the
+#: anchor does not come from CCC: blend the model's own gaps toward the
+#: **pre-CCC** values and grade against CCC's real humans.  The least-squares
+#: optimum over the five outcomes is
+#:
+#: ==================  =====
+#: model               w*
+#: ==================  =====
+#: Qwen2.5-7B          1.09
+#: **Qwen2.5-72B**     **0.83**
+#: Muse-Glimmer-30B    0.46
+#: ==================  =====
+#:
+#: :data:`PARTY_DONOR` is a Qwen2.5-72B run, so 0.83 is the estimate that applies.
+#: Two things argue for shading it down and neither is measurable here: the donor
+#: is the *quota-demographics* run, whose party structure is better than the
+#: elicited run CCC graded (r +0.912 against +0.838), and CCC's human party
+#: variable folds leaners into the two parties while ours does not, which inflates
+#: the measured model error.  0.7 sits below every direct estimate for this model
+#: family and well above the 0.5 the infeasible decomposition defended.
+#:
+#: This reaches the demographic sections only.  Party offsets are a demographic
+#: term, so no effect metric and no Section 1 number can move.
+PARTY_GAP_WEIGHT = 0.7
 
 #: Mean absolute human intervention effect, in pp of scale range, per study.
 #: Real effect magnitudes genuinely differ 4.5-fold between these studies, which

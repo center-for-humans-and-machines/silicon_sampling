@@ -205,8 +205,15 @@ def test_party_gaps_move_toward_the_external_anchors():
     """
     weight = R.PARTY_GAP_WEIGHT
     assert 0.0 < weight <= 1.0
-    # Half, not all: two of the three public sources contrast ideology, not party.
+    # Not all: even CCC's directly measured gaps are another study's, and the
+    # three trust anchors are TISP's, on a different survey.
     assert weight < 1.0
+    # Not half either.  Blending toward the *pre-CCC* anchors and grading against
+    # CCC's held-out humans -- the one route with no circularity, since the anchor
+    # then comes from neither the model nor the grader -- puts the least-squares
+    # optimum at 1.09 / 0.83 / 0.46 for Qwen2.5-7B / Qwen2.5-72B / Muse.  The
+    # party donor is a Qwen2.5-72B run, so the weight belongs above 0.5.
+    assert weight > 0.5
     anchors = R.PARTY_GAP_ANCHORS
     # The topic spread is the whole point; a flat set of anchors would do nothing
     # that the donor model does not already do.
