@@ -1,276 +1,258 @@
-# The recipe I would ship today
+# Building a synthetic sample of the Pfänder megastudy
 
-[← back to the final report](README.md) · basis:
-[the verified cross-validation](four_study_cross_validation_verified.md) ·
-[defects found](audit_findings.md) · supersedes
-[the recipe, part by part](the_recipe.md)
-
-What I would submit for Pfänder **right now**, using only the LLM inference
-already on disk. No new sampling is required for any of it — one export step is,
-and it is a column rename.
-
-Four things change from the shipped entry. Three are corrections the audit
-forced; one is an addition the corrected cross-validation now supports.
+**Method summary.** How we construct 18,000 synthetic survey respondents whose
+treatment effects, response distributions and demographic structure are meant to
+match a real megastudy that has not yet been unblinded.
 
 ---
 
-## The recipe
+## At a glance
 
-```python
-Recipe(
-    name="combined-v2",
-    # --- effects: what the leaderboard sorts on -------------------------
-    effects_from=(
-        "qwen25_7b_demo", "qwen25_7b", "qwen25_7b_seed2", "qwen25_7b_seed3",
-        "qwen25_72b_demo", "qwen25_72b", "qwen25_72b_seed2",
-        "muse_glimmer_30b",                       # NEW — third model
-    ),
-    within_shrink=0.5,
-    shrink=0.383,                                 # was 0.4127
-    flatten_noise=False,                          # was True
-    # --- structure: level, demographics, dispersion ---------------------
-    level_from="v4_flash",
-    offsets_from="v4_flash",
-    residuals_from="v4_flash",
-    residual_scale=1.12,
-    level_anchors=LEVEL_ANCHORS,                  # policy_general 68.01 -> 65.88
-    # --- party, the one moderator the model is not told ------------------
-    party_offsets_from="qwen25_72b_demo",
-    party_gap_anchors=PARTY_GAP_ANCHORS,          # policy_general 32.9 -> 37.3
-    party_gap_weight=0.7,                         # was 0.5
-)
+| | |
+| --- | --- |
+| **Task** | Predict the results of a 16-intervention climate-trust megastudy before the human data are released |
+| **Approach** | Behavioural cloning: base LLMs answer the real questionnaire as sampled respondents |
+| **Submission** | 18,000 individual-level synthetic respondents × 33 columns |
+| **Key design choice** | One respondent's answer is assembled from **four different models**, each supplying the one term it is best at |
+| **Validated on** | 4 published megastudies, 52,652 real respondents, held out one at a time |
+| **Expected score** | Pooled *r* ≈ **0.33** on effect recovery (95% CI ≈ ±0.13); a fresh half-sample of real humans scores 0.55 on the same task |
+
+---
+
+## 1. The prediction task
+
+The megastudy fields **16 message interventions** intended to increase trust in
+climate scientists, against a shared control, and measures **13 preregistered
+outcomes** on a US sample of roughly 18,000 people. The outcome data are locked.
+
+Submissions are scored by a preregistered pipeline. The human sample is split in
+half on a fixed seed; every submission is scored against **Human 1**, and
+**Human 2** is run through the identical pipeline to give a *human replication
+reference* — how well a fresh sample of real people predicts real people. That
+reference, not 1.0, is the yardstick.
+
+Four families of metrics are scored, and they are close to independent of one
+another:
+
+1. **Treatment effects** — the 16 × 13 = 208 intervention × outcome effects. The
+   leaderboard sorts on the pooled Pearson correlation between our effects and
+   the humans'.
+2. **Subgroup effects** — the same, split by six demographic moderators.
+3. **Response distributions** — how the synthetic control arm's answers are
+   *distributed*, not just where they average.
+4. **Demographic calibration** — group means, parity across groups, and whether
+   the model exaggerates demographic differences.
+
+A submission can be excellent at (1) and terrible at (3). That fact is the whole
+basis of the design.
+
+## 2. The central design decision
+
+A synthetic respondent's answer to one item is overwhelmingly *not* about which
+intervention they saw. Measured on our own samples:
+
+| outcome | total SD | between-arm SD | share of variance |
+| --- | --- | --- | --- |
+| trust (12-item battery) | 22.5 | 0.55 | 0.06% |
+| trust (single item) | 28.3 | 0.50 | 0.03% |
+| distrust | 31.1 | 0.46 | 0.02% |
+| **mean** | | | **0.03%** |
+
+**The condition effect is about one-fiftieth of one within-arm standard
+deviation.** Where the distribution sits and how wide it is accounts for 99.97%
+of the response — and the benchmark grades those two things *separately*, against
+different references.
+
+So we do not ask one model to do both. Each respondent's answer is assembled as
+
+```
+response  =  level  +  condition effect  +  demographic offset  +  residual
 ```
 
-Every row of the submission is still
+with each term taken from whichever model predicts *that term* best, and the
+terms are separable in practice as well as in principle: changing the demographic
+term moves 21 outcome columns and leaves the effect vector bit-identical
+(*r* = 1.000000).
 
-    response = level + condition effect + demographic offset + residual
+This matters because the models are bad in complementary ways. DeepSeek-V4-Flash
+ranks interventions worse than chance (mean *r* = −0.04 across four validation
+studies) yet places response levels closer to external benchmarks than anything
+else (2.6 points of error against 6.1–7.7 for the alternatives). Qwen2.5-7B is
+its mirror image: the best ranker, and the least plausible people (its trust
+battery has a mean inter-item correlation of 0.47 where real respondents have
+0.61). Neither model is good. Splitting the terms lets each contribute only what
+it is good at.
 
-with each term taken from whichever run predicts *that term* best. The whole
-design rests on those terms being separable, which they measurably are: the party
-weight change below moves 21 outcome columns and leaves the effect vector
-bit-identical at r = 1.000000.
+## 3. The components
 
-| term | from | why |
+**Respondents.** Rows come from a run in which each synthetic respondent is
+handed census-quota demographics rather than inventing their own. Left to
+themselves the models produce 0.8% of respondents under \$30,000 where the real
+population has 13.5%, which starves the demographic analyses of cases.
+
+**Condition effects** — the term the leaderboard sorts on. We average the effect
+vectors of **eight sampling runs across three models** (Qwen2.5-7B, Qwen2.5-72B,
+Muse-Glimmer-30B), averaging *within* a model first and then across models, so
+each model carries equal weight regardless of how many runs of it exist.
+DeepSeek-V4-Flash is excluded from this term only.
+
+Averaging is the single largest free improvement in the method, and it works
+because the models' errors are close to independent: two runs of the same model
+agree at *r* ≈ 0.84, two different models at *r* ≈ 0.55. Averaging decorrelated
+estimates of the same signal raises the correlation with that signal. It pays for
+*decorrelation*, not for the added model being good — Muse-Glimmer is the weakest
+single model of the three and still improves the average.
+
+Two shrinkage steps follow. Each intervention's effect is pulled halfway toward
+its own outcome's mean effect (**within-outcome shrinkage, 0.5**), because we
+predict *which outcomes move* far better than *which message moves them*. Then
+every effect is multiplied by a global factor (**0.383**), which is provably
+neutral on the correlation — a positive scalar cannot move a correlation — but is
+most of the story for error magnitude and calibration slope.
+
+**Levels**, i.e. where each outcome's control-arm distribution sits, come from
+DeepSeek-V4-Flash. Eight of the thirteen outcomes are additionally **pinned
+exactly to external anchors**: three from a public science-trust survey that asks
+the same battery, five from a climate megastudy from which this study borrowed
+items — two of them *verbatim identical*. On the anchored outcomes the residual
+error is the anchor's transfer error rather than the model's.
+
+**Demographic structure** comes from DeepSeek-V4-Flash, except **party**, which is
+the one moderator this questionnaire does not tell the respondent — it is
+*elicited* early in the survey, so the party structure in a sample is the model's
+own consistency rather than a demographic it was asked to perform. Party offsets
+therefore come from a different run, and are blended **70% toward externally
+estimated Democrat–Republican gaps**. Unanchored, the models produce party gaps
+roughly half the real size.
+
+**Dispersion.** These models answer with more within-cell spread than real
+participants, so residuals are rescaled by a fitted factor to match human
+dispersion. This touches only within-cell spread; level, effects and demographic
+offsets are separate terms and pass through untouched, so it can reach the
+distributional metrics without moving the sort key.
+
+### Summary
+
+| term | source | graded against |
 | --- | --- | --- |
-| rows and demographics | `qwen25_7b_demo` | quota-drawn income, education and party |
-| condition effect | 8 runs / 3 models, model-balanced | best effect ranking; averaging strips sampling noise |
-| level | `v4_flash`, 8 of 13 outcomes pinned to anchors | closest to external level anchors by a wide margin |
-| demographic offset | `v4_flash`, party from `qwen25_72b_demo` | best pooled offsets; best party structure |
-| residual | `v4_flash`, scaled 1.12 | dispersion closest to human, then fitted to it |
+| rows and demographics | Qwen2.5-7B, quota demographics | — |
+| condition effect | 8 runs / 3 models, averaged, shrunk twice | human treatment effects |
+| level | DeepSeek-V4-Flash; 8 of 13 pinned to external anchors | human control-arm means |
+| demographic offset | DeepSeek-V4-Flash; party blended 70% to anchors | human group means, parity |
+| residual | DeepSeek-V4-Flash, rescaled to human dispersion | distribution shape |
 
----
+## 4. How the method was validated
 
-## The four changes, and the evidence for each
+Nothing about arm contrasts can be measured on the target study, which publishes
+no participant responses. So every free choice is validated on **four published
+megastudies** that do — 52,652 real respondents, 36 interventions, 283
+intervention × outcome effects between them — using the same sampling pipeline
+and the same scoring code.
 
-### 1. Add Muse-Glimmer-30B to the effect average
+**Leave-one-study-out, with the fitting nested.** For each held-out study, every
+free choice — which runs to average, both shrinkage factors, which run supplies
+the level and the dispersion — is fitted on the other three alone, and the
+assembled recipe is scored once on the study it never saw. Earlier versions of
+this project fitted parameters out-of-fold but chose the *structure* by looking at
+all studies at once; nesting the fitting is what makes that selection visible.
 
-**Expected gain: about +0.03 on `pearson_r`.** This is the only change that
-touches the sort key.
+**Averaged over half-splits.** Every variant is scored against the same half of
+the human sample, so that half's sampling noise is common to all of them and one
+draw can reorder variants that differ by less than it. Results are therefore
+reported both for a single preregistered-style split — which is what the target
+study will actually do — and averaged over eight. The split-to-split standard
+deviation is 0.04–0.08, larger than most differences between design variants, and
+an earlier conclusion of this project reversed once it was averaged.
 
-The corrected cross-validation says a three-model average beats the Qwen pair —
-**0.350 against 0.312** averaged over eight half-splits of four studies, and the
-three-model rule wins in 8 of 8 splits against any raw single model. Muse's
-errors sit differently from the Qwens': cross-model effect vectors correlate
-about 0.55 where two runs of the same model correlate about 0.84. Averaging pays
-for decorrelation, not for the added model being good — and Muse is *not* good.
-It is the weakest single model over four folds (0.244) and the worst of the three
-on two folds outright.
+**With the benchmark's own uncertainty interval**, a cluster bootstrap over
+interventions, which is what every leaderboard row will carry.
 
-**The catch, and why it does not sink the change.** The cross-validation compares
-one run per model. On Pfänder the Qwen side is seven runs and Muse would be one,
-and model-balanced averaging hands each model a third of the weight regardless.
-Muse's single Pfänder run is the noisiest in the set — measured reliability
-**0.580**, against 0.857 for `qwen25_7b` and 0.777 for `qwen25_72b`. So adding it
-buys decorrelated signal and pays in noise. Both sides are measurable:
+### What the validation says
 
-| | value |
+Effect recovery, averaged over four held-out studies and eight splits:
+
+| | pooled *r* |
 | --- | --- |
-| observed fold gain from adding Muse | ×1.122 (0.312 → 0.350) |
-| of that, real signal rather than a reliability difference | **×1.110** |
-| reliability cost on Pfänder (0.957 → 0.923 for the ensemble) | **×0.982** |
-| **net** | **×1.090** |
+| **the method above** | **0.35** |
+| the same without the third model | 0.31 |
+| best single model, uncalibrated | 0.26 |
+| *human replication reference* | *0.55* |
 
-The gain survives the cost with room to spare. If the two Muse replicate seeds
-ever land, its noise divides by three, the ×0.982 penalty mostly disappears, and
-the gain rises toward the full ×1.110.
+The calibrated method beats every raw single model in **8 of 8 splits**. Its
+advantage over a single model — about +0.10 — is roughly a fifth of the way from
+a raw model to a fresh human sample.
 
-**What I am not doing:** down-weighting Muse to reflect its noisier run.
-Inverse-variance weighting across models would give it less than a third, and
-might well be better — but equal model-balanced weighting is what the
-cross-validation actually validated, and fitting a weight here is the exact move
-the audit spent its time catching.
+## 5. Expected performance, and what dominates the uncertainty
 
-### 2. Turn `flatten_noise` off
+**Pooled *r* ≈ 0.33**, with a 95% cluster-bootstrap interval of about **±0.13**.
 
-`NOISE_FLOOR_OUTCOMES = ('belief_post', 'donation_ams')` shrinks those two
-outcomes' within-outcome spread by 0.2, on the grounds that their effect variance
-is pure sampling noise. That diagnostic was run with a **hardcoded `se = 1.0`**.
-Redone with the ensemble's measured standard errors, neither outcome floors, and
-the pair is not the pair the measurement picks out:
+Two adjustments separate the validation number from the prediction, and both are
+measured rather than assumed. The validation studies give one sampling run per
+model where the submission averages eight, which makes the submission's effect
+vector *less* noisy and its correlation correspondingly higher. Against that, the
+third model enters the submission with a single run and undiminished noise, which
+gives back part of the gain. Net, these very nearly cancel.
 
-| outcome | sd of effects | rms se | **true sd** | signal/noise |
-| --- | --- | --- | --- | --- |
-| `donation_ams` * | 0.733 | 0.651 | **0.337** | 0.52 |
-| `newsletter_signup` | 0.762 | 0.480 | 0.592 | 1.23 |
-| `belief_post` * | 0.824 | 0.536 | **0.625** | 1.17 |
-| `inst_trust_mean` | 0.791 | 0.455 | 0.647 | 1.42 |
-| … | | | | |
-| `policy_role_mean` | 1.900 | 0.512 | 1.830 | 3.57 |
+**What dominates is neither.** The same method scores 0.01 on one validation study
+and 0.46 on another. That eightfold spread is larger than every design choice in
+this document put together, and it tracks one thing: how large a study's true
+intervention effects are relative to the precision with which a half-sample can
+measure them. On the hardest study, 79% of the observed variance in the human
+reference is sampling noise, and even the humans only predict themselves at
+*r* = 0.37.
 
-\* currently flattened.
+Whether the target study looks like the easy end or the hard end of that range is
+not knowable from its published protocol. It is the single most important
+unknown, it applies to every entry on the leaderboard rather than only to this
+one, and it is why the interval above is wide.
 
-`belief_post` sits mid-pack and is indistinguishable from `newsletter_signup` and
-`inst_trust_mean`, neither of which is flattened. Only `donation_ams` looks like
-a genuine noise floor. Rather than keep a hand-picked pair that the measurement
-contradicts, or invent a threshold that happens to select the one survivor, the
-component comes out. If it goes back in it should be as a rule on measured
-signal-to-noise, applied to whatever it catches.
+## 6. Known limitations
 
-### 3. Fix the `policy_general` anchor to the item Pfänder actually reuses
+**Three quarters of the benchmark rests on a component that could not be
+cross-validated.** The structural donor — the model supplying levels, demographics
+and dispersion — is DeepSeek-V4-Flash, and it has no sample on one of the four
+validation studies. The fold search therefore cannot even consider it, so every
+distributional and demographic result in the validation describes a donor the
+submission does not use.
 
-This is the sharpest single defect in the anchor set, and it moves three shipped
-constants at once.
+**Subgroup effects are the weakest prediction.** Across four held-out studies the
+method recovers condition × moderator interactions at *r* ≈ −0.08. The consolation
+is that the human replication reference on the same task is only +0.07: at these
+cell sizes a fresh human sample barely predicts the other half either.
 
-Pfänder asks: *"The U.S. government should do more to reduce global warming"*.
-The anchor's own note says `'...verbatim'` — but it is measured on
-`Policies_Post`, CCC's **three-item composite**, whose other two items ask about
-*greenhouse gas emissions* and *energy efficiency*. Those are different
-questions and they behave differently. CCC's Q19 is the verbatim match, and it is
-`Policies_Post_3`:
+**Two validation studies carry known instrument-rendering defects** that would
+require re-sampling to fix — one where slider ranges were never shown to the
+model, one where a fixed-budget allocation question was rendered without its
+constraint. The second was repaired in analysis by renormalising to the budget
+the real instrument enforced; the first cannot be repaired and is a reason to
+distrust that study's level metrics.
 
-| CCC item | level | sd | D−R party gap |
-| --- | --- | --- | --- |
-| `Policies_Post` (composite, **as shipped**) | 68.01 | 29.32 | 32.91 |
-| `Policies_Post_1` — greenhouse gas emissions | 66.20 | 31.94 | 35.62 |
-| `Policies_Post_2` — energy efficiency | 71.96 | 27.79 | 25.75 |
-| **`Policies_Post_3` — reduce global warming (Q19)** | **65.88** | **32.89** | **37.34** |
-
-The pattern corroborates itself: energy efficiency is the least polarised item
-(gap 25.8) and explicit global-warming policy the most (37.3), which is what you
-would expect and is why averaging them is the wrong summary for this outcome.
-
-Three constants move: level anchor **68.01 → 65.88**, dispersion **29.32 →
-32.89**, party gap **32.9 → 37.34**. The level anchor is arithmetic, so this
-directly changes the submitted control-arm mean on one of thirteen outcomes.
-
-### 4. Raise the party-gap blend weight to 0.7, and correct the shrink constant
-
-**Party weight 0.5 → 0.7.** The argument for 0.5 does not survive: it needs the
-donor's distance from the anchors, and the 7.36 pp it used is the distance from
-the *pre-CCC* anchor set. Like-for-like it is 6.03, which makes the implied donor
-variance negative. Measured out of sample instead — blend toward the pre-CCC
-values, grade against CCC's real humans, so the anchor comes from neither the
-model nor the grader — the least-squares optimum is 1.09 / **0.83** / 0.46 for
-7B / 72B / Muse, and the party donor is a 72B run. 0.7 shades that down for two
-things the measurement cannot see. Party-gap RMSE against the anchors falls
-**4.45 → 3.12 pp**; Section 1 is untouched by construction.
-
-**Global shrink 0.4127 → 0.383.** `shrink_for_runs` rescales the fitted factor by
-`reliability_here / SHRINK_FITTED_RELIABILITY`, and that denominator is set to
-0.870 — a **Pfänder** one-run-each figure. But `GLOBAL_SHRINK = 0.375` was fitted
-on the *reference studies*, where the one-run-each Qwen pair's measured
-reliability is **0.903**. Using the Pfänder number as the reference over-corrects.
-With the right denominator and the three-model ensemble's 0.923, the factor is
-0.375 × 0.923 / 0.903 = **0.383**.
-
-Shrinkage is provably neutral on `pearson_r` — a positive scalar cannot move a
-correlation — so this reaches RMSE and β only. It is worth getting right because
-β is a reported metric and the shipped value overshoots it.
+**One shrinkage constant is untested for the donor that uses it.** The dispersion
+rescale was fitted on an external survey for DeepSeek-V4-Flash, and the one study
+that could test it out-of-sample is the study V4-Flash has no run on.
 
 ---
 
-## What I would deliberately not change
+## Appendix — reproducibility
 
-**DeepSeek-V4-Flash stays out of the effect average and stays as the structural
-donor.** It has a mean effect-recovery correlation of **−0.040** across the
-reference studies — worse than submitting nothing — and adding it to the effect
-average costs 0.075. It also places control-arm levels better than any other run
-by a wide margin (2.59 pp against 6.06–7.74 for the Qwen donors). The component
-split exists precisely so a model can be excluded from the term it is bad at and
-kept for the three it is good at. This is the single strongest result in the
-project and nothing in the audit touched it.
+The submission is built by `scripts/build_entries.py`, which writes three
+Tier-1 entries (the benchmark scores all three at no penalty): the method above;
+the same without global shrinkage, the one axis where that step could hurt and
+cannot help the sort key; and the uncalibrated best single ranker, as insurance
+against every calibration being wrong at once.
 
-**`within_shrink` stays at 0.5.** Over eight splits, 0.3 scores 0.315 and 0.5
-scores 0.312 — indistinguishable, and the split-to-split sd is 0.067. The curve
-is flat and fitting inside a flat region buys noise. Its selection optimism is
-measured at 0.005.
+Validation is reproduced by `scripts/nested_cv.py` (effect recovery, both split
+readings) and `scripts/nested_benchmark.py` (all four metric families, running
+the real recipe rather than a reimplementation of it). Full results in
+[the verified cross-validation](four_study_cross_validation_verified.md);
+defects found and fixed in [the audit](audit_findings.md).
 
-**`residual_scale` stays at 1.12, flagged.** The CCC hold-out found it makes two
-of three models *worse* on every shape metric. But it was fitted on TISP for
-V4-Flash, and V4-Flash has no CCC sample — so the negative result is about donors
-we do not use. This is the largest untested constant in the recipe and I would
-not defend it; I keep it because there is no evidence against it *for this donor*
-and removing it is equally unsupported.
-
----
-
-## What to expect
-
-| | shipped entry | **this recipe** |
-| --- | --- | --- |
-| `pearson_r` (sort key) | 0.30 | **0.33** |
-| 95% interval the benchmark prints | 0.17 – 0.43 | **0.20 – 0.46** |
-| party-gap RMSE vs anchors | 4.45 pp | **3.12 pp** |
-| `beta` | 1.15 | closer to 1 |
-
-The point estimate depends on how strictly you charge the within-outcome factor.
-Charging it as fitted per fold — the conservative reading my prediction report
-uses — gives 0.325. Taking the pre-committed-rule row, which is what this recipe
-actually instantiates, gives 0.35. I would state **0.33 ± the same ±0.13
-cluster-bootstrap half-width**, and note that the difference between the two
-readings (0.025) is a fifth of the interval width.
-
-**The honest summary is that this is a ~10% improvement on one metric inside an
-interval four times its size.** Which study Pfänder resembles still matters far
-more than anything in this recipe: the same basis scores 0.009 on CCC and 0.460
-on Voelkel.
-
----
-
-## Building it
-
-Everything below is post-inference. No sampling.
-
-1. **Export Muse's Tier-1 frame.** `data/pfander/silicon_sampling/muse_glimmer_30b/`
-   has `samples.csv` but no `tier1_submission.csv`, and no `answers.jsonl` to
-   rebuild one from. It does not need one: the samples file already carries all
-   13 scored outcomes, `condition`, all six moderators, and the twelve trust
-   items under their raw Qualtrics names (`trust_competent_1` …). The Tier-1
-   frame is a column rename through `pfander.outcomes.DIRECT`. Muse supplies only
-   the effect term, so only the 13 outcomes are load-bearing.
-2. **Update the two `policy_general` anchors** in `anchors/ccc.py` to
-   `Policies_Post_3`, and let `PARTY_GAP_ANCHORS` / `HUMAN_DISPERSION` follow.
-3. **Set `flatten_noise=False`** and **`party_gap_weight=0.7`** (already done) in
-   `scripts/build_entries.py`'s `common` dict.
-4. **Fix `SHRINK_FITTED_RELIABILITY`** to the reference-study figure (0.903), and
-   give Muse measured variance components so `ensemble_reliability` stops
-   returning `None` for any ensemble containing it — otherwise `shrink_for_runs`
-   silently falls back to the unadjusted 0.375.
-5. `python scripts/build_entries.py` and check the drift audit is at floating
-   point, as it is today (4.3 × 10⁻⁴ pp).
-
-The three-entry structure still makes sense, since the benchmark scores all
-three with no penalty: **primary** as above; **secondary-1** identical without
-global shrinkage, which is the one axis where shrinkage could hurt and cannot
-help the sort key; **secondary-2** the uncalibrated best single ranker, as
-insurance against every calibration being wrong at once.
-
-## What would change this
-
-**Two more Muse seeds** would take its reliability from 0.580 toward the Qwens'
-and turn a ×1.090 net gain into something near ×1.110. This is the cheapest
-available improvement and it is pure sampling — no new design work.
-
-**A CCC run of DeepSeek-V4-Flash** would let the cross-validation grade the
-structural donor the entry actually uses. Right now every Section 3 and 10–12
-number in the cross-validation describes a donor chosen from {7B, 72B, Muse},
-because V4 has no CCC sample. Three-quarters of the benchmark rests on a
-component that has never been cross-validated, and this is the one run that would
-fix it.
-
-**Voelkel re-sampled with its slider ranges stated.** 52 of its 53 integer
-sliders reach the model with no numeric range — the exact defect the `_v3` audit
-fixed for ICPC and Goldwert, where it had compressed every effect roughly
-five-fold — and four of its items carry unresolved `${e://Field/...}` pipes.
-Voelkel is currently the fold this recipe scores highest on, which is a reason to
-distrust that number rather than enjoy it.
+**Changes from the previous version of this method**, all supported by the
+re-derivation above: a third model joins the effect average (+0.03 expected on
+the sort key); a noise-flooring step is removed, its two target outcomes having
+been selected by a diagnostic run with a placeholder standard error; one external
+anchor is corrected from a three-item composite to the single item the target
+study actually reuses (level 68.0 → 65.9, dispersion 29.3 → 32.9, party gap
+32.9 → 37.3); the party blend weight rises 0.5 → 0.7 on an out-of-sample
+measurement; and the global shrinkage constant is corrected 0.413 → 0.383, having
+been rescaled against the wrong reference quantity.
