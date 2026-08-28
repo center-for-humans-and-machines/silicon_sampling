@@ -74,19 +74,21 @@ def memberships(available: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
     return tuple(out)
 
 
-def load(study: F.FoldStudy) -> dict:
-    """Human halves, per-run effect pairs, and per-run control arms.
+#: Sample frames and their effect tables, read once and re-used across splits.
+_CACHE: dict[str, dict] = {}
 
-    Every frame -- human and synthetic -- goes through the study's ``prepare``
-    first, so both sides carry the same condition vocabulary and, on CCC, the
-    same donation budget.
+
+def _samples(study: F.FoldStudy) -> dict:
+    """This study's silicon samples and their effect tables, cached.
+
+    Reading four studies' samples is most of the runtime, and none of it depends
+    on which half of the humans is the reference -- so a multi-split run pays it
+    once rather than once per split.
     """
-    humans = study.prepare(study.load_humans())
-    human1, human2 = half_split(humans)
-    reference = study.effects(human1)
+    if study.name in _CACHE:
+        return _CACHE[study.name]
     scored = set(study.design.outcomes)
-    reference = reference[reference["outcome"].isin(scored)]
-    pairs, controls = {}, {}
+    frames, effects, controls = {}, {}, {}
     for run in RUNS:
         key = MODELS.resolve_run(study.samples_dir, run)
         if key is None:
@@ -94,13 +96,41 @@ def load(study: F.FoldStudy) -> dict:
         sample = study.prepare(
             pd.read_csv(study.samples_dir(key) / "samples.csv", low_memory=False)
         )
-        frame = study.effects(sample)
+        frames[run] = sample
+        table = study.effects(sample)
+        effects[run] = table[table["outcome"].isin(scored)]
+        controls[run] = sample[sample["condition"].astype(str) == study.design.control]
+    humans = study.prepare(study.load_humans())
+    _CACHE[study.name] = {"effects": effects, "controls": controls, "humans": humans}
+    return _CACHE[study.name]
+
+
+def load(study: F.FoldStudy, seed: int = 42) -> dict:
+    """Human halves, per-run effect pairs, and per-run control arms.
+
+    Every frame -- human and synthetic -- goes through the study's ``prepare``
+    first, so both sides carry the same condition vocabulary and, on CCC, the
+    same donation budget.
+
+    ``seed`` picks the half-split.  The benchmark fixes one preregistered split
+    and scores against it, so a single seed is the right model of what Pfänder
+    will do -- but it is the wrong tool for *choosing between recipes*, because
+    the reference half's sampling noise is shared by every variant and one draw
+    of it can reorder them.  ``main(--splits N)`` averages over N seeds for that
+    reason, and reports both.
+    """
+    cached = _samples(study)
+    human1, human2 = half_split(cached["humans"], seed=seed)
+    reference = study.effects(human1)
+    scored = set(study.design.outcomes)
+    reference = reference[reference["outcome"].isin(scored)]
+    pairs, controls = {}, dict(cached["controls"])
+    for run, frame in cached["effects"].items():
         pairs[run] = (
-            ate_pairs(reference, frame[frame["outcome"].isin(scored)])
+            ate_pairs(reference, frame)
             .dropna(subset=["estimate_h", "estimate_l"])
             .set_index(["outcome", "condition"])
         )
-        controls[run] = sample[sample["condition"].astype(str) == study.design.control]
     index = None
     for frame in pairs.values():
         index = frame.index if index is None else index.intersection(frame.index)
@@ -364,41 +394,9 @@ def reliability(estimate, se) -> float:
     return float(max(0.0, 1.0 - np.nanmean(se**2) / spread))
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bootstrap", type=int, default=0)
-    parser.add_argument("studies", nargs="*", default=None)
-    args = parser.parse_args(argv)
-
-    pd.set_option("display.width", 250)
-    data = {study.name: load(study) for study in F.load_folds(args.studies or None)}
-    names = list(data)
-
-    # A run is a candidate only where every study has it.  Report the exclusions:
-    # a silently narrowed search reads as a search that considered and rejected.
-    available = tuple(r for r in RUNS if all(r in data[n]["pairs"] for n in names))
-    print("=== run availability ===\n")
-    for run in RUNS:
-        have = [n for n in names if run in data[n]["pairs"]]
-        missing = [n for n in names if run not in data[n]["pairs"]]
-        mark = "candidate" if run in available else "EXCLUDED"
-        note = f"  (missing: {', '.join(missing)})" if missing else ""
-        print(f"  {run:20s} {mark:10s} present in {len(have)}/{len(names)}{note}")
-    print(
-        f"\n  {len(memberships(available))} candidate ensembles "
-        f"x {len(WITHIN_GRID)} within-shrink values searched per fold"
-    )
-    print("\n  scored grid per study (pairs, after dropping redundant outcomes):")
-    for name in names:
-        study = data[name]["study"]
-        dropped = f"  dropped: {', '.join(study.dropped)}" if study.dropped else ""
-        print(
-            f"    {name:9s} {len(data[name]['index']):4d} pairs "
-            f"= {len(study.design.outcomes)} outcomes "
-            f"x {len(study.design.conditions) - 1} arms{dropped}"
-        )
-    print()
-
+def evaluate(data: dict, names: list[str], available: tuple[str, ...],
+             bootstrap: int) -> tuple[list[dict], list[dict]]:
+    """Score every variant on every fold, for one half-split of the humans."""
     rows, chosen = [], []
     for held in names:
         train = [data[n] for n in names if n != held]
@@ -416,7 +414,7 @@ def main(argv: list[str] | None = None) -> int:
         test = effect_vector(data[held], fit["membership"], fit["within"])
         test["estimate_l"] = fit["kappa"] * test["estimate_l"]
         test["se_l"] = fit["kappa"] * test["se_l"]
-        row = {"held out": held, **section1(test), **interval(test, args.bootstrap)}
+        row = {"held out": held, **section1(test), **interval(test, bootstrap)}
         row.update(control_metrics(data[held], fit["donor"], fit["residual_scale"]))
         row["what"] = "recipe, fitted on the other three"
         rows.append(row)
@@ -425,7 +423,7 @@ def main(argv: list[str] | None = None) -> int:
         rrow = {
             "held out": held,
             **section1(rep),
-            **interval(rep, args.bootstrap),
+            **interval(rep, bootstrap),
             "what": "human replication",
         }
         rows.append(rrow)
@@ -468,7 +466,7 @@ def main(argv: list[str] | None = None) -> int:
                     {
                         "held out": held,
                         **section1(te),
-                        **interval(te, args.bootstrap),
+                        **interval(te, bootstrap),
                         "what": label,
                     }
                 )
@@ -483,7 +481,7 @@ def main(argv: list[str] | None = None) -> int:
             row = {
                 "held out": held,
                 **section1(te),
-                **interval(te, args.bootstrap),
+                **interval(te, bootstrap),
                 "what": label,
             }
             row.update(control_metrics(data[held], fit["donor"], fit["residual_scale"]))
@@ -512,11 +510,80 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "held out": held,
                     **section1(te),
-                    **interval(te, args.bootstrap),
+                    **interval(te, bootstrap),
                     "what": label,
                 }
             )
 
+    return rows, chosen
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--bootstrap", type=int, default=0)
+    parser.add_argument(
+        "--splits",
+        type=int,
+        default=1,
+        help=(
+            "average over this many half-splits of the humans. 1 (the default) "
+            "reproduces the single preregistered-style split the benchmark uses; "
+            "more is the right tool for comparing variants, because the reference "
+            "half's noise is shared by all of them and one draw can reorder them."
+        ),
+    )
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("studies", nargs="*", default=None)
+    args = parser.parse_args(argv)
+
+    pd.set_option("display.width", 250)
+    studies = F.load_folds(args.studies or None)
+    seeds = [args.seed + offset for offset in range(max(1, args.splits))]
+    data = {study.name: load(study, seed=seeds[0]) for study in studies}
+    names = list(data)
+
+    # A run is a candidate only where every study has it.  Report the exclusions:
+    # a silently narrowed search reads as a search that considered and rejected.
+    available = tuple(r for r in RUNS if all(r in data[n]["pairs"] for n in names))
+    print("=== run availability ===\n")
+    for run in RUNS:
+        have = [n for n in names if run in data[n]["pairs"]]
+        missing = [n for n in names if run not in data[n]["pairs"]]
+        mark = "candidate" if run in available else "EXCLUDED"
+        note = f"  (missing: {', '.join(missing)})" if missing else ""
+        print(f"  {run:20s} {mark:10s} present in {len(have)}/{len(names)}{note}")
+    print(
+        f"\n  {len(memberships(available))} candidate ensembles "
+        f"x {len(WITHIN_GRID)} within-shrink values searched per fold"
+    )
+    print("\n  scored grid per study (pairs, after dropping redundant outcomes):")
+    for name in names:
+        study = data[name]["study"]
+        dropped = f"  dropped: {', '.join(study.dropped)}" if study.dropped else ""
+        print(
+            f"    {name:9s} {len(data[name]['index']):4d} pairs "
+            f"= {len(study.design.outcomes)} outcomes "
+            f"x {len(study.design.conditions) - 1} arms{dropped}"
+        )
+    print()
+
+    rows, chosen = evaluate(data, names, available, args.bootstrap)
+    across = None
+    if len(seeds) > 1:
+        # The variant comparison, averaged over splits.  Every variant is scored
+        # against the *same* reference half within a split, so the reference's
+        # sampling noise is common to all of them -- which is exactly why a single
+        # split can reorder variants that differ by less than that noise, and why
+        # averaging over splits estimates the ordering far better than it
+        # estimates any one score.
+        collected = []
+        for seed in seeds:
+            per_seed = {study.name: load(study, seed=seed) for study in studies}
+            got, _ = evaluate(per_seed, names, available, 0)
+            frame = pd.DataFrame(got)
+            frame["seed"] = seed
+            collected.append(frame)
+        across = pd.concat(collected, ignore_index=True)
     print(
         "=== what the training folds chose, never having seen the held-out study ===\n"
     )
@@ -603,6 +670,66 @@ def main(argv: list[str] | None = None) -> int:
             f"{c}={sub[c].mean():+.3f}" for c in s1 if c in sub and sub[c].notna().any()
         )
         print(f"  {what:42s} {cells}")
+
+    if across is not None:
+        print(
+            f"\n\n=== averaged over {len(seeds)} half-splits of the humans ===\n"
+        )
+        print(
+            "  A single split is what Pfander will do, so the block above is the\n"
+            "  right model of one score.  It is the wrong tool for ranking variants:\n"
+            "  they share a reference half, so one draw of its noise moves them\n"
+            "  together and can reorder any pair separated by less than it.\n"
+        )
+        summary = (
+            across.groupby(["what", "seed"])["pearson_r"]
+            .mean()
+            .groupby("what")
+            .agg(["mean", "std", "min", "max"])
+        )
+        summary["se"] = summary["std"] / np.sqrt(len(seeds))
+        order = [w for w in [
+            "recipe, fitted on the other three",
+            "2x2: membership by prior, within fitted",
+            "2x2: membership fitted, within fixed 0.5",
+            *RULES,
+            *FIXED,
+            *[f"single: {r.replace('_v3', '')}, uncalibrated" for r in RUNS],
+            "human replication",
+        ] if w in summary.index]
+        print(
+            summary.loc[order, ["mean", "se", "std", "min", "max"]].to_string(
+                float_format=lambda v: f"{v:7.3f}"
+            )
+        )
+        single = across[across["seed"] == seeds[0]].groupby("what")["pearson_r"].mean()
+        beats = []
+        base = "single: qwen25_7b, uncalibrated"
+        if base in summary.index:
+            for what in order:
+                if what in (base, "human replication"):
+                    continue
+                delta = (
+                    across[across["what"] == what]
+                    .groupby("seed")["pearson_r"]
+                    .mean()
+                    - across[across["what"] == base].groupby("seed")["pearson_r"].mean()
+                )
+                beats.append(
+                    {
+                        "variant": what,
+                        "mean delta vs raw 7B": delta.mean(),
+                        "splits where it wins": f"{int((delta > 0).sum())}/{len(seeds)}",
+                        "delta at seed 42": single.get(what, float("nan"))
+                        - single.get(base, float("nan")),
+                    }
+                )
+            print("\n  against an uncalibrated Qwen2.5-7B:\n")
+            print(
+                pd.DataFrame(beats).to_string(
+                    index=False, float_format=lambda v: f"{v:+7.3f}"
+                )
+            )
 
     # How much of each side's spread is signal, measured from the standard errors
     # rather than assumed.  This is what licenses -- or refuses -- the step from a
