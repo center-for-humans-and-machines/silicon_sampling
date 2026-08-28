@@ -61,6 +61,14 @@ MODELS = {
     # `muse_glimmer`, and the checkpoint carries no `auto_map` so there is no
     # trust_remote_code path either.  See MUSE_GLIMMER_CONTAINER.
     "muse_glimmer_30b": "meta-models/Muse-Glimmer-30B",
+    # Generation replicates for Muse-Glimmer, on the two replicate profile sets
+    # Qwen2.5-7B already used.  Without them Muse cannot join :data:`BEST_RANKERS`
+    # at all: ``ensemble_reliability`` splits a model's variance into signal and
+    # noise using its own seed-to-seed correlations, and one run has none to
+    # correlate.  It returns ``None`` rather than guessing, which is right --
+    # a guessed reliability silently rescales the shrinkage.
+    "muse_glimmer_30b_seed2": "meta-models/Muse-Glimmer-30B",
+    "muse_glimmer_30b_seed3": "meta-models/Muse-Glimmer-30B",
 }
 
 #: The only image that can load Muse-Glimmer.  It carries vLLM 0.26.1rc1 and
@@ -76,7 +84,11 @@ MUSE_GLIMMER_CONTAINER = (
 #: we never send any: every template in this project is text, and media a human saw
 #: is described in prose.  Passing an image would make one model's transcripts
 #: incomparable with the other three on the same respondent.
-MULTIMODAL_CAPABLE = ("muse_glimmer_30b",)
+MULTIMODAL_CAPABLE = (
+    "muse_glimmer_30b",
+    "muse_glimmer_30b_seed2",
+    "muse_glimmer_30b_seed3",
+)
 
 #: Human-readable names for report tables and plot legends.
 LABELS = {
@@ -89,6 +101,8 @@ LABELS = {
     "qwen25_72b_v2": "Qwen2.5-72B (scale stated)",
     "v4_flash_v2": "DeepSeek-V4-Flash (scale stated)",
     "muse_glimmer_30b": "Muse-Glimmer-30B",
+    "muse_glimmer_30b_seed2": "Muse-Glimmer-30B (replicate)",
+    "muse_glimmer_30b_seed3": "Muse-Glimmer-30B (replicate 3)",
     "qwen25_7b_demo": "Qwen2.5-7B (quota demographics)",
     "qwen25_72b_demo": "Qwen2.5-72B (quota demographics)",
     "v4_flash_demo": "DeepSeek-V4-Flash (quota demographics)",

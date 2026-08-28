@@ -5,7 +5,8 @@ Final report. The submission is three Tier-1 entries in
 synthetic respondents × 33 columns, all passing the benchmark's validator.
 
 Sub-reports: [**what to expect on Pfänder**](prediction.md) ·
-[**nested cross-validation**](cross_validation.md) ·
+[**four studies, four models**](four_study_cross_validation.md) ·
+[nested cross-validation, three studies](cross_validation.md) ·
 [the recipe, part by part](the_recipe.md) ·
 [two Voelkel studies](voelkel_2026.md) ·
 [calibration design](calibration_design/README.md) ·

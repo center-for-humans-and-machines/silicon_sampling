@@ -35,6 +35,7 @@ Run: ``python scripts/nested_cv.py``
 
 from __future__ import annotations
 
+import itertools
 import warnings
 
 import numpy as np
@@ -47,22 +48,31 @@ from silicon_sampling.benchmark.reference import ate_pairs, half_split
 
 warnings.filterwarnings("ignore")
 
-RUNS = ("qwen25_7b_v3", "qwen25_72b_v3", "v4_flash_v3")
+RUNS = ("qwen25_7b_v3", "qwen25_72b_v3", "v4_flash_v3", "muse_glimmer_30b")
 
-#: Candidate effect ensembles.  One run per model is all these studies have, so
-#: the shipped eight-run average cannot be represented here; the gap is handled
-#: in the report by the measured reliability difference, not by pretending.
-MEMBERSHIPS = (
-    ("qwen25_7b_v3",),
-    ("qwen25_72b_v3",),
-    ("v4_flash_v3",),
-    ("qwen25_7b_v3", "qwen25_72b_v3"),
-    ("qwen25_7b_v3", "qwen25_72b_v3", "v4_flash_v3"),
-)
+#: Candidate effect ensembles: every non-empty subset of the runs a fold actually
+#: has.  One run per model is all these studies have, so the shipped eight-run
+#: average cannot be represented here; the gap is handled in the report by the
+#: measured reliability difference, not by pretending.
+#:
+#: The subsetting is per fold and is *reported*, because it is currently doing
+#: real work: DeepSeek-V4-Flash has no CCC sample yet, CCC is in the training set
+#: of every fold, and so no membership containing V4 is a candidate anywhere.
+#: That is the deliberate pre-V4 state, not an oversight — but a silent version of
+#: it would read as "the search considered V4 and rejected it", which is false.
 WITHIN_GRID = tuple(np.round(np.arange(0.0, 1.01, 0.1), 2))
 
 
+def memberships(available: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
+    """Every non-empty subset of *available*, shortest first, in ``RUNS`` order."""
+    out = []
+    for size in range(1, len(available) + 1):
+        out.extend(itertools.combinations(available, size))
+    return tuple(out)
+
+
 def study_config() -> list[dict]:
+    from silicon_sampling.ccc import outcomes as co
     from silicon_sampling.goldwert import outcomes as go
     from silicon_sampling.voelkel import outcomes as vo
 
@@ -87,6 +97,13 @@ def study_config() -> list[dict]:
             "paths": "silicon_sampling.goldwert.paths",
             "scales": dict(go.SCORED),
             "moderators": ("party", "gender", "education", "age_band"),
+        },
+        {
+            "name": "CCC",
+            "score": "silicon_sampling.ccc.score",
+            "paths": "silicon_sampling.ccc.paths",
+            "scales": dict(co.SCORED),
+            "moderators": ("party", "gender", "race", "education", "age_band"),
         },
     ]
 
@@ -184,10 +201,10 @@ def control_metrics(data: dict, donor: str, scale: float) -> dict:
     }
 
 
-def fit_on_training(train: list[dict]) -> dict:
+def fit_on_training(train: list[dict], available: tuple[str, ...]) -> dict:
     """Every free choice, decided on the training studies alone."""
     best = None
-    for membership in MEMBERSHIPS:
+    for membership in memberships(available):
         for within in WITHIN_GRID:
             frames = [effect_vector(d, membership, within) for d in train]
             pooled = pd.concat(frames, ignore_index=True)
@@ -203,7 +220,7 @@ def fit_on_training(train: list[dict]) -> dict:
     kappa = float(np.cov(human, ours, ddof=1)[0, 1] / np.var(ours, ddof=1))
 
     donor_best = None
-    for donor in RUNS:
+    for donor in available:
         if any(donor not in d["controls"] for d in train):
             continue
         # residual scale that matches human dispersion on the training studies
@@ -256,17 +273,92 @@ FIXED = {
     "Qwen pair, no within shrink": (("qwen25_7b_v3", "qwen25_72b_v3"), 1.0),
     "Qwen pair, within 0.3": (("qwen25_7b_v3", "qwen25_72b_v3"), 0.3),
     "7B alone, within 0.5": (("qwen25_7b_v3",), 0.5),
+    "Qwen pair + Muse, within 0.5": (
+        ("qwen25_7b_v3", "qwen25_72b_v3", "muse_glimmer_30b"),
+        0.5,
+    ),
+    "Qwen pair + Muse, no within shrink": (
+        ("qwen25_7b_v3", "qwen25_72b_v3", "muse_glimmer_30b"),
+        1.0,
+    ),
+    "Muse alone, within 0.5": (("muse_glimmer_30b",), 0.5),
 }
 
 
-def main() -> int:
+#: Membership *rules* rather than membership choices.
+#:
+#: The distinction is the one the previous round got wrong.  Reading four fold
+#: means and then declaring "average the Qwens and Muse" is a selection made on
+#: the held-out data, and it will not transfer to Pfaender.  A rule -- "average
+#: every run that clears this bar on the training studies" -- is decided once, and
+#: each fold instantiates it without ever seeing its own answer.  So the rule can
+#: be scored honestly even though the memberships it produces differ per fold.
+def rule_all(train: list[dict], available: tuple[str, ...]) -> tuple[str, ...]:
+    """Average everything there is.  No selection at all, so nothing to leak."""
+    return available
+
+
+def rule_positive(train: list[dict], available: tuple[str, ...]) -> tuple[str, ...]:
+    """Average every run whose own training correlation is positive.
+
+    The bar exists because a run can be anti-correlated with the truth -- V4-Flash
+    is, on two studies -- and averaging that in is worse than dropping it.  Falls
+    back to the single best run if nothing clears zero, so the rule always returns
+    something.
+    """
+    scored = []
+    for run in available:
+        pooled = pd.concat(
+            [effect_vector(d, (run,), 1.0) for d in train], ignore_index=True
+        )
+        scored.append(
+            (float(np.corrcoef(pooled["estimate_h"], pooled["estimate_l"])[0, 1]), run)
+        )
+    keep = tuple(run for r, run in scored if r > 0)
+    return keep if keep else (max(scored)[1],)
+
+
+RULES = {
+    "rule: average all available, within 0.5": (rule_all, 0.5),
+    "rule: positive training r, within 0.5": (rule_positive, 0.5),
+    "rule: positive training r, no within shrink": (rule_positive, 1.0),
+}
+
+
+def main(argv: list[str] | None = None) -> int:
     pd.set_option("display.width", 250)
-    data = {cfg["name"]: load(cfg) for cfg in study_config()}
+    wanted = list(argv or [])
+    configs = study_config()
+    if wanted:
+        known = {c["name"] for c in configs}
+        unknown = [w for w in wanted if w not in known]
+        if unknown:
+            raise SystemExit(
+                f"unknown study: {', '.join(unknown)} (have {sorted(known)})"
+            )
+        configs = [c for c in configs if c["name"] in wanted]
+    data = {cfg["name"]: load(cfg) for cfg in configs}
     names = list(data)
+
+    # A run is a candidate only where every study has it.  Report the exclusions:
+    # a silently narrowed search reads as a search that considered and rejected.
+    available = tuple(r for r in RUNS if all(r in data[n]["pairs"] for n in names))
+    print("=== run availability ===\n")
+    for run in RUNS:
+        have = [n for n in names if run in data[n]["pairs"]]
+        missing = [n for n in names if run not in data[n]["pairs"]]
+        mark = "candidate" if run in available else "EXCLUDED"
+        note = f"  (missing: {', '.join(missing)})" if missing else ""
+        print(f"  {run:20s} {mark:10s} present in {len(have)}/{len(names)}{note}")
+    print(
+        f"\n  {len(memberships(available))} candidate ensembles "
+        f"x {len(WITHIN_GRID)} within-shrink values searched per fold\n"
+    )
+
     rows, chosen = [], []
     for held in names:
         train = [data[n] for n in names if n != held]
-        fit = fit_on_training(train)
+        fit = fit_on_training(train, available)
         chosen.append(
             {
                 "held out": held,
@@ -291,7 +383,7 @@ def main() -> int:
             rrow.pop(key, None)
         rows.append(rrow)
 
-        for run in RUNS:
+        for run in available:
             single = effect_vector(data[held], (run,), 1.0)
             srow = {
                 "held out": held,
@@ -300,8 +392,38 @@ def main() -> int:
             }
             rows.append(srow)
 
+        # Membership decided by a pre-committed rule, instantiated on training.
+        for label, (rule, within) in RULES.items():
+            membership = rule(train, available)
+            tr = pd.concat(
+                [effect_vector(d, membership, within) for d in train],
+                ignore_index=True,
+            )
+            k = float(
+                np.cov(tr["estimate_h"], tr["estimate_l"], ddof=1)[0, 1]
+                / np.var(tr["estimate_l"], ddof=1)
+            )
+            te = effect_vector(data[held], membership, within)
+            te["estimate_l"] = k * te["estimate_l"]
+            row = {"held out": held, **section1(te), "what": label}
+            row.update(control_metrics(data[held], fit["donor"], fit["residual_scale"]))
+            rows.append(row)
+            chosen.append(
+                {
+                    "held out": held,
+                    "membership": ",".join(membership).replace("_v3", ""),
+                    "within": within,
+                    "kappa": k,
+                    "donor": "",
+                    "residual_scale": float("nan"),
+                    "rule": label,
+                }
+            )
+
         # Structure fixed a priori; only the global factor is fitted on training.
         for label, (membership, within) in FIXED.items():
+            if any(r not in available for r in membership):
+                continue
             tr = pd.concat(
                 [effect_vector(d, membership, within) for d in train], ignore_index=True
             )
@@ -362,13 +484,12 @@ def main() -> int:
             index=False, float_format=lambda v: f"{v:7.3f}"
         )
     )
-    print("\n\n=== fold means (no interval: three folds cannot support one) ===\n")
+    print("\n\n=== fold means (four folds: still too few for an interval) ===\n")
     order = [
         "recipe, fitted on the other two",
+        *RULES,
         *FIXED,
-        "single: qwen25_7b, uncalibrated",
-        "single: qwen25_72b, uncalibrated",
-        "single: v4_flash, uncalibrated",
+        *[f"single: {r.replace('_v3', '')}, uncalibrated" for r in RUNS],
         "human replication",
     ]
     for what in order:
@@ -383,4 +504,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import sys
+
+    raise SystemExit(main(sys.argv[1:]))

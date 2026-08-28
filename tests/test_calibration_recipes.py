@@ -285,3 +285,62 @@ def test_ccc_anchors_switch_off_when_ccc_is_held_out():
     assert A.levels(A.for_study("CCC")) == {}
     assert A.party_gaps(A.for_study("CCC")) == {}
     assert A.levels(A.for_study("Goldwert"))
+
+
+def test_no_two_ensemble_runs_of_one_model_are_the_same_draw():
+    """Two runs drawn from the same per-respondent seeds are one draw, not two.
+
+    ``qwen25_72b_seed3`` was sampled against a copy of ``qwen25_72b_seed2``'s
+    ``profiles.csv``, so the two shared every RNG seed: 77.1% of their scored
+    cells came out byte-identical and their effect vectors correlated 0.959,
+    against 0.745-0.856 for every other 72B pair.  Nothing failed -- the entry
+    built, the checks passed, and :func:`ensemble_reliability` quietly divided
+    that model's noise by four when it should have divided by three.
+
+    The check is on the *draws* rather than on the profile files, because sharing
+    a profile set is not by itself the defect.  Every model is supposed to sample
+    the same respondents with the same seeds -- that is what makes profile
+    ``p00001`` one person across the whole project -- and the ``_demo`` runs share
+    a seed column with their parent while still differing, because the quota
+    demographics change the prompt.  What must never happen is two runs of *one*
+    model landing on one draw, and only the answers can say whether they did.
+
+    Genuine replicate pairs agree on 9-11% of cells by chance; the duplicate
+    agreed on 77.1%.  The threshold sits well clear of both.
+    """
+    import pandas as pd
+
+    from silicon_sampling import models as MODELS
+    from silicon_sampling.calibration import tier1 as T1
+    from silicon_sampling.pfander import paths as P
+
+    design = T1.pfander_instrument()
+    frames = {}
+    for run in R.BEST_RANKERS:
+        path = P.samples_dir(run) / "samples.csv"
+        if not path.exists():  # pragma: no cover - some runs live only on scratch
+            continue
+        frame = pd.read_csv(path, low_memory=False)
+        frames[run] = frame.sort_values("profile_id").reset_index(drop=True)
+
+    duplicates = []
+    runs = sorted(frames)
+    for i, left in enumerate(runs):
+        for right in runs[i + 1 :]:
+            if MODELS.MODELS[left] != MODELS.MODELS[right]:
+                continue
+            a, b = frames[left], frames[right]
+            same = total = 0
+            for outcome in design.scales:
+                if outcome not in a.columns or outcome not in b.columns:
+                    continue
+                x = pd.to_numeric(a[outcome], errors="coerce")
+                y = pd.to_numeric(b[outcome], errors="coerce")
+                same += int(((x == y) | (x.isna() & y.isna())).sum())
+                total += len(x)
+            if total and same / total > 0.40:
+                duplicates.append(
+                    f"{left} and {right} agree on {same / total:.1%} of cells"
+                )
+
+    assert not duplicates, "these are one draw, not two: " + "; ".join(duplicates)

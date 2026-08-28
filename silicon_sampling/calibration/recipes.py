@@ -445,6 +445,25 @@ def apply(
 #: quota run correlates 0.864 with the three elicited seeds, where those seeds
 #: correlate 0.846 with each other, so it sits inside the seed-noise band rather
 #: than outside it.  Control-arm levels move by half a point.
+#: **``qwen25_72b_seed3`` is deliberately absent, and it is not a typo.**  It was
+#: sampled against the *same* ``profiles.csv`` as ``qwen25_72b_seed2`` -- the
+#: replicate profile set was copied rather than regenerated -- so the two runs
+#: share every per-respondent RNG seed and are not independent draws.  The
+#: evidence is unambiguous at both levels: 77.1% of their scored cells are
+#: byte-identical and their per-respondent answers correlate 0.853, against 9-11%
+#: and 0.01-0.08 for every genuine replicate pair in the project; their *effect*
+#: vectors correlate 0.959 against 0.745-0.856 for every other 72B pair.
+#:
+#: Averaging it in does not corrupt the entry -- the eight-run and seven-run
+#: averages correlate 0.998 and differ by 0.049 pp against a vector spread of
+#: 1.53 pp -- but it does make the ensemble *claim* a reliability it does not
+#: have, 0.964 where the honest figure is 0.957, and that claim feeds
+#: :func:`shrink_for_runs`.  A duplicate counted as a seed is a lie about how
+#: much sampling noise has been averaged away, so it comes out.
+#:
+#: To restore the eighth run, re-sample it against ``qwen25_7b_seed2``'s profile
+#: set, which is the one replicate set Qwen2.5-72B has never used.  See
+#: ``tests/test_calibration_recipes.py`` for the guard that now catches this.
 BEST_RANKERS = (
     "qwen25_7b_demo",
     "qwen25_7b",
@@ -453,7 +472,6 @@ BEST_RANKERS = (
     "qwen25_72b_demo",
     "qwen25_72b",
     "qwen25_72b_seed2",
-    "qwen25_72b_seed3",
 )
 
 #: The run three independent sources agree is closest to real response levels.
