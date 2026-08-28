@@ -1,23 +1,17 @@
-"""Nested leave-one-study-out cross-validation of the whole recipe.
+"""Nested leave-one-study-out cross-validation of the effect side of the recipe.
 
 Every earlier evaluation in this project held out *parameters* while choosing
-other things on all three studies at once.  ``loso.py`` fits a shrinkage factor on
-two studies and scores it on the third, which is honest as far as it goes, but the
+other things on all studies at once.  ``loso.py`` fits a shrinkage factor on two
+studies and scores it on the third, which is honest as far as it goes, but the
 ensemble membership, the within-outcome factor and the structural donor were all
-picked by looking at the mean across all three -- so the numbers that came out
+picked by looking at the mean across all of them -- so the numbers that came out
 were contaminated by selection even though each individual score was out-of-fold.
 
 This closes that.  For each held-out study, **every free choice is fitted on the
-other two only**:
-
-* which runs' effects to average
-* the within-outcome shrink factor
-* the global shrink factor
-* which run supplies the level, the residual spread and the demographic offsets
-* the residual scale
-
-and the assembled recipe is then scored once on the held-out study, across the
-metric families the benchmark reports rather than on the sort key alone.
+others only**: which runs' effects to average, the within-outcome shrink factor,
+the global shrink factor, which run supplies the level and the residual spread,
+and the residual scale.  The assembled recipe is then scored once on the held-out
+study.
 
 **The selection rule is fixed before looking at any held-out score**, and it is
 lexicographic rather than a weighted composite, because the leaderboard sorts on
@@ -27,14 +21,22 @@ pooled Pearson r:
 2. the global factor is set so the **training** calibration slope is exactly 1
 3. the donor and residual scale minimise **training** level and dispersion error
 
-Three folds cannot support an interval and none is reported.  What they can show
-is whether the recipe beats its own components on data it never saw.
+Four folds cannot support an interval on the *fold mean*, and none is reported
+for it.  What can be reported, and now is, is the benchmark's own uncertainty
+interval: a cluster bootstrap over interventions within each fold, which is the
+preregistered interval every leaderboard row will carry.
 
-Run: ``python scripts/nested_cv.py``
+**This grades effects only.**  ``scripts/nested_benchmark.py`` is the companion
+that assembles a real :class:`~silicon_sampling.calibration.recipes.Recipe` per
+fold and scores it on all four benchmark sections; the two agree on Section 1 to
+within 0.002, which is what makes the fast grid here trustworthy.
+
+Run: ``python scripts/nested_cv.py [--bootstrap 1000] [studies...]``
 """
 
 from __future__ import annotations
 
+import argparse
 import itertools
 import warnings
 
@@ -45,21 +47,22 @@ from silicon_sampling import models as MODELS
 from silicon_sampling.benchmark import distributions as DIST
 from silicon_sampling.benchmark import metrics as MET
 from silicon_sampling.benchmark.reference import ate_pairs, half_split
+from silicon_sampling.calibration import folds as F
 
 warnings.filterwarnings("ignore")
 
 RUNS = ("qwen25_7b_v3", "qwen25_72b_v3", "v4_flash_v3", "muse_glimmer_30b")
 
 #: Candidate effect ensembles: every non-empty subset of the runs a fold actually
-#: has.  One run per model is all these studies have, so the shipped eight-run
-#: average cannot be represented here; the gap is handled in the report by the
-#: measured reliability difference, not by pretending.
+#: has.  One run per model is all these studies have, so the shipped seven-run
+#: average cannot be represented here; the gap is handled by the measured
+#: reliability difference reported at the end, not by pretending.
 #:
 #: The subsetting is per fold and is *reported*, because it is currently doing
-#: real work: DeepSeek-V4-Flash has no CCC sample yet, CCC is in the training set
-#: of every fold, and so no membership containing V4 is a candidate anywhere.
-#: That is the deliberate pre-V4 state, not an oversight — but a silent version of
-#: it would read as "the search considered V4 and rejected it", which is false.
+#: real work: DeepSeek-V4-Flash has no CCC sample, CCC is in the training set of
+#: every fold, and so no membership containing V4 is a candidate anywhere.  That
+#: is the deliberate pre-V4 state, not an oversight — but a silent version of it
+#: would read as "the search considered V4 and rejected it", which is false.
 WITHIN_GRID = tuple(np.round(np.arange(0.0, 1.01, 0.1), 2))
 
 
@@ -71,78 +74,54 @@ def memberships(available: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
     return tuple(out)
 
 
-def study_config() -> list[dict]:
-    from silicon_sampling.ccc import outcomes as co
-    from silicon_sampling.goldwert import outcomes as go
-    from silicon_sampling.voelkel import outcomes as vo
+def load(study: F.FoldStudy) -> dict:
+    """Human halves, per-run effect pairs, and per-run control arms.
 
-    return [
-        {
-            "name": "Voelkel",
-            "score": "silicon_sampling.voelkel.score",
-            "paths": "silicon_sampling.voelkel.paths",
-            "scales": {k: 100.0 for k in vo.OUTCOMES},
-            "moderators": ("party_gen", "gender", "race", "education", "age_band"),
-        },
-        {
-            "name": "ICPC",
-            "score": "silicon_sampling.icpc.score",
-            "paths": "silicon_sampling.icpc.paths",
-            "scales": {"belief": 100.0, "policy": 100.0, "sharing": 1.0, "wept": 8.0},
-            "moderators": ("gender", "education", "age_band", "ideology_band"),
-        },
-        {
-            "name": "Goldwert",
-            "score": "silicon_sampling.goldwert.score",
-            "paths": "silicon_sampling.goldwert.paths",
-            "scales": dict(go.SCORED),
-            "moderators": ("party", "gender", "education", "age_band"),
-        },
-        {
-            "name": "CCC",
-            "score": "silicon_sampling.ccc.score",
-            "paths": "silicon_sampling.ccc.paths",
-            "scales": dict(co.SCORED),
-            "moderators": ("party", "gender", "race", "education", "age_band"),
-        },
-    ]
-
-
-def load(cfg: dict) -> dict:
-    """Human halves, per-run effect pairs, and per-run control arms."""
-    score = __import__(cfg["score"], fromlist=["x"])
-    paths = __import__(cfg["paths"], fromlist=["x"])
-    human1, human2 = half_split(score.load_humans())
-    reference = score.effects(human1)
+    Every frame -- human and synthetic -- goes through the study's ``prepare``
+    first, so both sides carry the same condition vocabulary and, on CCC, the
+    same donation budget.
+    """
+    humans = study.prepare(study.load_humans())
+    human1, human2 = half_split(humans)
+    reference = study.effects(human1)
+    scored = set(study.design.outcomes)
+    reference = reference[reference["outcome"].isin(scored)]
     pairs, controls = {}, {}
     for run in RUNS:
-        key = MODELS.resolve_run(paths.samples_dir, run)
+        key = MODELS.resolve_run(study.samples_dir, run)
         if key is None:
             continue
-        sample = pd.read_csv(paths.samples_dir(key) / "samples.csv", low_memory=False)
+        sample = study.prepare(
+            pd.read_csv(study.samples_dir(key) / "samples.csv", low_memory=False)
+        )
+        frame = study.effects(sample)
         pairs[run] = (
-            ate_pairs(reference, score.effects(sample))
+            ate_pairs(reference, frame[frame["outcome"].isin(scored)])
             .dropna(subset=["estimate_h", "estimate_l"])
             .set_index(["outcome", "condition"])
         )
-        mask = (
-            sample["condition"].astype(str).str.contains("ontrol", case=False, na=False)
-        )
-        controls[run] = sample[mask]
+        controls[run] = sample[
+            sample["condition"].astype(str) == study.design.control
+        ]
     index = None
     for frame in pairs.values():
         index = frame.index if index is None else index.intersection(frame.index)
-    column = next(c for c in ("condName", "condition", "cond") if c in human1.columns)
-    hmask = human1[column].astype(str).str.contains("ontrol", case=False, na=False)
-    replication = ate_pairs(reference, score.effects(human2)).dropna(
-        subset=["estimate_h", "estimate_l"]
-    )
+    replication_all = study.effects(human2)
+    replication = ate_pairs(
+        reference, replication_all[replication_all["outcome"].isin(scored)]
+    ).dropna(subset=["estimate_h", "estimate_l"])
+    # The ceiling has to be measured on the pairs the models are measured on, or
+    # it is a different question answered on a different grid.
+    replication = replication.set_index(["outcome", "condition"]).loc[index].reset_index()
     return {
-        "cfg": cfg,
+        "study": study,
+        "cfg": {"name": study.name, "scales": dict(study.design.outcomes)},
         "pairs": pairs,
         "index": index,
         "controls": controls,
-        "human_control": human1[hmask],
+        "human_control": human1[
+            human1[study.design.condition_col].astype(str) == study.design.control
+        ],
         "replication": replication,
     }
 
@@ -150,19 +129,35 @@ def load(cfg: dict) -> dict:
 def effect_vector(
     data: dict, membership: tuple[str, ...], within: float
 ) -> pd.DataFrame:
-    """Averaged, within-outcome-shrunk pairs frame for one study."""
+    """Averaged, within-outcome-shrunk pairs frame for one study.
+
+    The standard error travels with the estimate.  Averaging ``m`` runs of the
+    same target divides the sampling variance by ``m``, and the within-outcome
+    contraction multiplies the deviation -- and hence its error -- by ``within``.
+    Carrying the first member's raw ``se_l`` instead, as an earlier version did,
+    left ``beta_adj`` reading a reliability the vector being scored does not have.
+    """
     index = data["index"]
     base = data["pairs"][membership[0]].loc[index].copy()
     stack = np.mean(
         [data["pairs"][r].loc[index, "estimate_l"].to_numpy() for r in membership],
         axis=0,
     )
+    variance = np.mean(
+        [data["pairs"][r].loc[index, "se_l"].to_numpy() ** 2 for r in membership],
+        axis=0,
+    ) / len(membership)
     out = base.reset_index()
     out["estimate_l"] = stack
+    out["se_l"] = np.sqrt(variance)
     if within != 1.0:
         grouped = out.groupby("outcome")["estimate_l"]
         mean = grouped.transform("mean")
         out["estimate_l"] = mean + within * (out["estimate_l"] - mean)
+        # The per-outcome mean is itself an average of the cells, so contracting
+        # toward it leaves a little more error than a bare scaling; treating the
+        # mean as fixed is the standard approximation and is used here.
+        out["se_l"] = out["se_l"] * within
     return out
 
 
@@ -173,8 +168,26 @@ def section1(pairs: pd.DataFrame) -> dict:
     return out
 
 
+def interval(pairs: pd.DataFrame, draws: int) -> dict:
+    """The benchmark's own uncertainty interval: a cluster bootstrap over arms."""
+    if not draws:
+        return {}
+    got = MET.cluster_bootstrap(pairs, section1, cluster="condition", draws=draws)
+    return {
+        key: value
+        for key, value in got.items()
+        if key.startswith(("pearson_r", "spearman_rho", "directional_pct"))
+    }
+
+
 def control_metrics(data: dict, donor: str, scale: float) -> dict:
-    """Level error and the four shape metrics, on the donor's control arm."""
+    """Level error and the four shape metrics, on the donor's control arm.
+
+    Residuals are rescaled about the arm mean and then clipped to the scale, and
+    the mean is restored afterwards -- the shipped recipe recomposes and clips the
+    same way, and a version that clipped without restoring the mean quietly
+    reported a level error the submission would not have.
+    """
     cfg, human = data["cfg"], data["human_control"]
     synth = data["controls"][donor]
     level, shapes = [], []
@@ -185,8 +198,9 @@ def control_metrics(data: dict, donor: str, scale: float) -> dict:
         right = pd.to_numeric(synth[outcome], errors="coerce").dropna()
         if len(left) < 30 or len(right) < 30:
             continue
-        right = right.mean() + scale * (right - right.mean())
-        right = right.clip(0.0, span)
+        centre = right.mean()
+        right = (centre + scale * (right - centre)).clip(0.0, span)
+        right = (right + (centre - right.mean())).clip(0.0, span)
         level.append(abs(right.mean() - left.mean()) / span * 100)
         shapes.append(DIST.compare_distributions(left, right, lo=0.0, hi=span))
     if not shapes:
@@ -201,29 +215,45 @@ def control_metrics(data: dict, donor: str, scale: float) -> dict:
     }
 
 
+def training_r(train: list[dict], membership: tuple[str, ...], within: float) -> float:
+    pooled = pd.concat(
+        [effect_vector(d, membership, within) for d in train], ignore_index=True
+    )
+    return float(np.corrcoef(pooled["estimate_h"], pooled["estimate_l"])[0, 1])
+
+
+def training_kappa(
+    train: list[dict], membership: tuple[str, ...], within: float
+) -> float:
+    pooled = pd.concat(
+        [effect_vector(d, membership, within) for d in train], ignore_index=True
+    )
+    return float(
+        np.cov(pooled["estimate_h"], pooled["estimate_l"], ddof=1)[0, 1]
+        / np.var(pooled["estimate_l"], ddof=1)
+    )
+
+
+def best_within(train: list[dict], membership: tuple[str, ...]) -> float:
+    """The within factor that maximises training r for *this* membership."""
+    return float(max(WITHIN_GRID, key=lambda w: training_r(train, membership, w)))
+
+
 def fit_on_training(train: list[dict], available: tuple[str, ...]) -> dict:
     """Every free choice, decided on the training studies alone."""
     best = None
     for membership in memberships(available):
         for within in WITHIN_GRID:
-            frames = [effect_vector(d, membership, within) for d in train]
-            pooled = pd.concat(frames, ignore_index=True)
-            r = float(np.corrcoef(pooled["estimate_h"], pooled["estimate_l"])[0, 1])
+            r = training_r(train, membership, within)
             if best is None or r > best[0]:
                 best = (r, membership, within)
     _, membership, within = best
-    pooled = pd.concat(
-        [effect_vector(d, membership, within) for d in train], ignore_index=True
-    )
-    human = pooled["estimate_h"].to_numpy()
-    ours = pooled["estimate_l"].to_numpy()
-    kappa = float(np.cov(human, ours, ddof=1)[0, 1] / np.var(ours, ddof=1))
+    kappa = training_kappa(train, membership, within)
 
     donor_best = None
     for donor in available:
         if any(donor not in d["controls"] for d in train):
             continue
-        # residual scale that matches human dispersion on the training studies
         ratios = []
         for d in train:
             for outcome, span in d["cfg"]["scales"].items():
@@ -254,7 +284,7 @@ def fit_on_training(train: list[dict], available: tuple[str, ...]) -> dict:
     _, donor, scale = donor_best
     return {
         "membership": membership,
-        "within": within,
+        "within": float(within),
         "kappa": kappa,
         "donor": donor,
         "residual_scale": scale,
@@ -265,9 +295,15 @@ def fit_on_training(train: list[dict], available: tuple[str, ...]) -> dict:
 #:
 #: This distinction matters more than it looks.  The shipped recipe does not
 #: *choose* its membership or its within-outcome factor from data -- it averages
-#: every Qwen run there is, and takes 0.5 as a pre-committed default.  Letting the
-#: training folds pick those two instead adds fitting noise the real recipe never
-#: pays, so scoring only the fully-fitted variant understates it.
+#: every Qwen run there is, and takes 0.5 as a default.  Letting the training
+#: folds pick those two instead adds fitting noise the real recipe never pays, so
+#: scoring only the fully-fitted variant understates it.
+#:
+#: The word "pre-committed" is doing less work than it did: ``WITHIN_SHRINK``
+#: 0.5's own docstring records that it was adopted after measuring pooled r
+#: across the reference studies, so it is a *prior about the form* (shrink toward
+#: the outcome profile) with a magnitude that was fitted once, globally.  The 2x2
+#: below is what charges that magnitude honestly.
 FIXED = {
     "Qwen pair, within 0.5 (shipped design)": (("qwen25_7b_v3", "qwen25_72b_v3"), 0.5),
     "Qwen pair, no within shrink": (("qwen25_7b_v3", "qwen25_72b_v3"), 1.0),
@@ -306,14 +342,7 @@ def rule_positive(train: list[dict], available: tuple[str, ...]) -> tuple[str, .
     back to the single best run if nothing clears zero, so the rule always returns
     something.
     """
-    scored = []
-    for run in available:
-        pooled = pd.concat(
-            [effect_vector(d, (run,), 1.0) for d in train], ignore_index=True
-        )
-        scored.append(
-            (float(np.corrcoef(pooled["estimate_h"], pooled["estimate_l"])[0, 1]), run)
-        )
+    scored = [(training_r(train, (run,), 1.0), run) for run in available]
     keep = tuple(run for r, run in scored if r > 0)
     return keep if keep else (max(scored)[1],)
 
@@ -325,19 +354,26 @@ RULES = {
 }
 
 
+def reliability(estimate, se) -> float:
+    """Share of an effect vector's spread that is signal rather than draw noise."""
+    estimate = np.asarray(estimate, dtype=float)
+    se = np.asarray(se, dtype=float)
+    spread = np.nanvar(estimate, ddof=1)
+    if not spread > 0:
+        return float("nan")
+    return float(max(0.0, 1.0 - np.nanmean(se**2) / spread))
+
+
 def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--bootstrap", type=int, default=0)
+    parser.add_argument("studies", nargs="*", default=None)
+    args = parser.parse_args(argv)
+
     pd.set_option("display.width", 250)
-    wanted = list(argv or [])
-    configs = study_config()
-    if wanted:
-        known = {c["name"] for c in configs}
-        unknown = [w for w in wanted if w not in known]
-        if unknown:
-            raise SystemExit(
-                f"unknown study: {', '.join(unknown)} (have {sorted(known)})"
-            )
-        configs = [c for c in configs if c["name"] in wanted]
-    data = {cfg["name"]: load(cfg) for cfg in configs}
+    data = {
+        study.name: load(study) for study in F.load_folds(args.studies or None)
+    }
     names = list(data)
 
     # A run is a candidate only where every study has it.  Report the exclusions:
@@ -352,8 +388,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {run:20s} {mark:10s} present in {len(have)}/{len(names)}{note}")
     print(
         f"\n  {len(memberships(available))} candidate ensembles "
-        f"x {len(WITHIN_GRID)} within-shrink values searched per fold\n"
+        f"x {len(WITHIN_GRID)} within-shrink values searched per fold"
     )
+    print("\n  scored grid per study (pairs, after dropping redundant outcomes):")
+    for name in names:
+        study = data[name]["study"]
+        dropped = f"  dropped: {', '.join(study.dropped)}" if study.dropped else ""
+        print(
+            f"    {name:9s} {len(data[name]['index']):4d} pairs "
+            f"= {len(study.design.outcomes)} outcomes "
+            f"x {len(study.design.conditions) - 1} arms{dropped}"
+        )
+    print()
 
     rows, chosen = [], []
     for held in names:
@@ -371,65 +417,77 @@ def main(argv: list[str] | None = None) -> int:
 
         test = effect_vector(data[held], fit["membership"], fit["within"])
         test["estimate_l"] = fit["kappa"] * test["estimate_l"]
-        row = {"held out": held, **section1(test)}
+        test["se_l"] = fit["kappa"] * test["se_l"]
+        row = {"held out": held, **section1(test), **interval(test, args.bootstrap)}
         row.update(control_metrics(data[held], fit["donor"], fit["residual_scale"]))
-        row["what"] = "recipe, fitted on the other two"
+        row["what"] = "recipe, fitted on the other three"
         rows.append(row)
 
         rep = data[held]["replication"]
-        rrow = {"held out": held, **section1(rep), "what": "human replication"}
-        rrow.update(control_metrics(data[held], fit["donor"], fit["residual_scale"]))
-        for key in ("level_err_pp", "variance_ratio", "ovl", "ks", "w1"):
-            rrow.pop(key, None)
+        rrow = {
+            "held out": held,
+            **section1(rep),
+            **interval(rep, args.bootstrap),
+            "what": "human replication",
+        }
         rows.append(rrow)
 
         for run in available:
             single = effect_vector(data[held], (run,), 1.0)
-            srow = {
-                "held out": held,
-                **section1(single),
-                "what": f"single: {run.replace('_v3', '')}, uncalibrated",
-            }
-            rows.append(srow)
+            rows.append(
+                {
+                    "held out": held,
+                    **section1(single),
+                    "what": f"single: {run.replace('_v3', '')}, uncalibrated",
+                }
+            )
 
-        # The 2x2 that the Pfander prediction is built on: which of the two
+        # The 2x2 the Pfander prediction is built on: which of the two
         # data-informed choices -- membership and the within-outcome factor -- is
         # load-bearing, and what the recipe scores when each is charged as fitted
         # rather than granted as a prior.  The "both fitted" corner is the
-        # ``recipe`` row above and the "both fixed" corner is the shipped design;
-        # these are the two mixed corners, which nothing else computes.
+        # ``recipe`` row above and the "both fixed" corner is the shipped design.
+        #
+        # The within factor of the mixed corner is refitted **for the prior
+        # membership**, not carried over from the joint search: the joint argmax
+        # belongs to a different ensemble, and reusing it charges the prior
+        # membership for a factor nothing chose for it.
         prior = ("qwen25_7b_v3", "qwen25_72b_v3")
         if all(r in available for r in prior):
             for label, membership, within in (
-                ("2x2: membership by prior, within fitted", prior, fit["within"]),
+                (
+                    "2x2: membership by prior, within fitted",
+                    prior,
+                    best_within(train, prior),
+                ),
                 ("2x2: membership fitted, within fixed 0.5", fit["membership"], 0.5),
             ):
-                tr = pd.concat(
-                    [effect_vector(d, membership, within) for d in train],
-                    ignore_index=True,
-                )
-                k = float(
-                    np.cov(tr["estimate_h"], tr["estimate_l"], ddof=1)[0, 1]
-                    / np.var(tr["estimate_l"], ddof=1)
-                )
+                k = training_kappa(train, membership, within)
                 te = effect_vector(data[held], membership, within)
                 te["estimate_l"] = k * te["estimate_l"]
-                rows.append({"held out": held, **section1(te), "what": label})
+                te["se_l"] = k * te["se_l"]
+                rows.append(
+                    {
+                        "held out": held,
+                        **section1(te),
+                        **interval(te, args.bootstrap),
+                        "what": label,
+                    }
+                )
 
         # Membership decided by a pre-committed rule, instantiated on training.
         for label, (rule, within) in RULES.items():
             membership = rule(train, available)
-            tr = pd.concat(
-                [effect_vector(d, membership, within) for d in train],
-                ignore_index=True,
-            )
-            k = float(
-                np.cov(tr["estimate_h"], tr["estimate_l"], ddof=1)[0, 1]
-                / np.var(tr["estimate_l"], ddof=1)
-            )
+            k = training_kappa(train, membership, within)
             te = effect_vector(data[held], membership, within)
             te["estimate_l"] = k * te["estimate_l"]
-            row = {"held out": held, **section1(te), "what": label}
+            te["se_l"] = k * te["se_l"]
+            row = {
+                "held out": held,
+                **section1(te),
+                **interval(te, args.bootstrap),
+                "what": label,
+            }
             row.update(control_metrics(data[held], fit["donor"], fit["residual_scale"]))
             rows.append(row)
             chosen.append(
@@ -448,23 +506,23 @@ def main(argv: list[str] | None = None) -> int:
         for label, (membership, within) in FIXED.items():
             if any(r not in available for r in membership):
                 continue
-            tr = pd.concat(
-                [effect_vector(d, membership, within) for d in train], ignore_index=True
-            )
-            k = float(
-                np.cov(tr["estimate_h"], tr["estimate_l"], ddof=1)[0, 1]
-                / np.var(tr["estimate_l"], ddof=1)
-            )
+            k = training_kappa(train, membership, within)
             te = effect_vector(data[held], membership, within)
             te["estimate_l"] = k * te["estimate_l"]
-            rows.append({"held out": held, **section1(te), "what": label})
+            te["se_l"] = k * te["se_l"]
+            rows.append(
+                {
+                    "held out": held,
+                    **section1(te),
+                    **interval(te, args.bootstrap),
+                    "what": label,
+                }
+            )
 
     print(
         "=== what the training folds chose, never having seen the held-out study ===\n"
     )
-    print(
-        pd.DataFrame(chosen).to_string(index=False, float_format=lambda v: f"{v:.3f}")
-    )
+    print(pd.DataFrame(chosen).to_string(index=False, float_format=lambda v: f"{v:.3f}"))
 
     table = pd.DataFrame(rows)
     s1 = [
@@ -485,15 +543,34 @@ def main(argv: list[str] | None = None) -> int:
             index="what", columns="held out", values="pearson_r"
         ).to_string(float_format=lambda v: f"{v:6.3f}")
     )
+    if args.bootstrap and "pearson_r_lo" in table.columns:
+        print(
+            f"\n95% cluster-bootstrap intervals over interventions "
+            f"({args.bootstrap} draws), per fold:\n"
+        )
+        band = table.dropna(subset=["pearson_r_lo"])
+        band = band.assign(
+            interval=band.apply(
+                lambda r: f"{r['pearson_r']:6.3f} [{r['pearson_r_lo']:6.3f},"
+                f" {r['pearson_r_hi']:6.3f}]",
+                axis=1,
+            )
+        )
+        print(
+            band.pivot_table(
+                index="what", columns="held out", values="interval", aggfunc="first"
+            ).to_string()
+        )
     print("\nfull metric set, recipe rows only:\n")
-    keep = table[table["what"] == "recipe, fitted on the other two"]
+    keep = table[table["what"] == "recipe, fitted on the other three"]
     print(
         keep[
             ["held out"] + [c for c in s1 if c in keep] + [c for c in s3 if c in keep]
         ].to_string(index=False, float_format=lambda v: f"{v:7.3f}")
     )
     print(
-        "\nshipped design, per fold (structure pre-committed, only the global factor fitted):\n"
+        "\nshipped design, per fold "
+        "(structure pre-committed, only the global factor fitted):\n"
     )
     sd = table[table["what"] == "Qwen pair, within 0.5 (shipped design)"]
     print(
@@ -510,7 +587,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     print("\n\n=== fold means (four folds: still too few for an interval) ===\n")
     order = [
-        "recipe, fitted on the other two",
+        "recipe, fitted on the other three",
         "2x2: membership by prior, within fitted",
         "2x2: membership fitted, within fixed 0.5",
         *RULES,
@@ -525,11 +602,67 @@ def main(argv: list[str] | None = None) -> int:
         cells = " ".join(
             f"{c}={sub[c].mean():+.3f}" for c in s1 if c in sub and sub[c].notna().any()
         )
-        print(f"  {what:38s} {cells}")
+        print(f"  {what:42s} {cells}")
+
+    # How much of each side's spread is signal, measured from the standard errors
+    # rather than assumed.  This is what licenses -- or refuses -- the step from a
+    # fold mean to a Pfander prediction: correlations scale as the square root of
+    # the predictor's reliability, so a fold whose model vector is noisier than
+    # the submission's understates what the submission will score.
+    print("\n\n=== measured reliability of each side's effect vector ===\n")
+    rel_rows = []
+    for name in names:
+        d = data[name]
+        rep = d["replication"]
+        rel_rows.append(
+            {
+                "study": name,
+                "side": "human reference half",
+                "reliability": reliability(rep["estimate_h"], rep["se_h"]),
+            }
+        )
+        rel_rows.append(
+            {
+                "study": name,
+                "side": "human replication half",
+                "reliability": reliability(rep["estimate_l"], rep["se_l"]),
+            }
+        )
+        for run in available:
+            single = effect_vector(d, (run,), 1.0)
+            rel_rows.append(
+                {
+                    "study": name,
+                    "side": run.replace("_v3", ""),
+                    "reliability": reliability(single["estimate_l"], single["se_l"]),
+                }
+            )
+        prior = tuple(r for r in ("qwen25_7b_v3", "qwen25_72b_v3") if r in available)
+        if len(prior) == 2:
+            pair = effect_vector(d, prior, 1.0)
+            rel_rows.append(
+                {
+                    "study": name,
+                    "side": "AVG qwen pair",
+                    "reliability": reliability(pair["estimate_l"], pair["se_l"]),
+                }
+            )
+    rel = pd.DataFrame(rel_rows)
+    print(
+        rel.pivot_table(index="side", columns="study", values="reliability").to_string(
+            float_format=lambda v: f"{v:6.3f}"
+        )
+    )
+    pair_mean = rel[rel["side"] == "AVG qwen pair"]["reliability"].mean()
+    if pair_mean == pair_mean:
+        print(
+            f"\n  one-run-each Qwen pair, mean over folds: {pair_mean:.3f}\n"
+            "  (compare against the same quantity measured on Pfander's own runs;\n"
+            "   the ratio of the two square roots is the only defensible bridge\n"
+            "   from a fold mean to a Pfander prediction.)"
+        )
     return 0
 
 
 if __name__ == "__main__":
-    import sys
-
-    raise SystemExit(main(sys.argv[1:]))
+    raise SystemExit(main())

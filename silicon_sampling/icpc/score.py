@@ -133,17 +133,31 @@ def load_humans(conditions=CONDITIONS, path=DOELL_CSV) -> pd.DataFrame:
     frame["income_band"] = pd.to_numeric(frame["Income"], errors="coerce").map(
         INCOME_BANDS
     )
+    # ``astype(str)`` on a Categorical turns an unbanded respondent -- missing
+    # age, missing ideology, or a value outside the outermost break -- into the
+    # *string* ``"nan"``, which is then a moderator level like any other: it earns
+    # a dummy, a scored interaction estimate for every arm, and a demographic
+    # group in every table.  44 of ICPC's interaction terms were that group.  The
+    # silicon samples have no such respondents, so the subgroup grid could not be
+    # joined at all, which is how this surfaced.
     breaks, labels = AGE_BREAKS
-    frame["age_band"] = pd.cut(
-        pd.to_numeric(frame["Age"], errors="coerce"), breaks, labels=labels
-    ).astype(str)
+    frame["age_band"] = _banded(
+        pd.to_numeric(frame["Age"], errors="coerce"), breaks, labels
+    )
     mean_ideology = (
         pd.to_numeric(frame["Politics2_1"], errors="coerce")
         + pd.to_numeric(frame["Politics2_9"], errors="coerce")
     ) / 2
     breaks, labels = IDEOLOGY_BREAKS
-    frame["ideology_band"] = pd.cut(mean_ideology, breaks, labels=labels).astype(str)
+    frame["ideology_band"] = _banded(mean_ideology, breaks, labels)
     return frame.reset_index(drop=True)
+
+
+def _banded(values: pd.Series, breaks, labels) -> pd.Series:
+    """``pd.cut`` as strings, with unbanded respondents left missing."""
+    banded = pd.cut(values, breaks, labels=labels)
+    text = banded.astype(str)
+    return text.where(banded.notna())
 
 
 def arm_counts(frame: pd.DataFrame) -> pd.DataFrame:

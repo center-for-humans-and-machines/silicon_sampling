@@ -151,12 +151,23 @@ def calibrate_binary(
     target of zero leaves an arm alone.  Rates are clipped into ``[0, 1]``: an
     effect large enough to push a rate outside that is not representable, and the
     clip is reported by the caller's drift audit rather than silently applied.
+
+    **Missing values are missing, not zeros.**  An unparseable answer leaves the
+    cell ``NaN``, and ``NaN`` satisfies neither ``>= 0.5`` nor ``< 0.5`` — so a
+    naive version counts those rows in the arm's denominator while being unable
+    to flip any of them, which drives the rate off target by the missingness
+    rate, and then ``astype(int)`` on the surviving ``NaN`` turns it into
+    ``-2**63``.  Pfänder's ``newsletter_signup`` has no missing values so the
+    shipped entry never met this, but ICPC's ``sharing`` is missing on 24% of
+    rows and produced exactly that integer.  The rate is therefore computed over
+    the rows that *have* an answer, and missing rows are returned missing.
     """
     rng = np.random.default_rng(seed)
     values = frame[outcome].to_numpy(float).copy()
-    baseline = float(np.nanmean(values[frame["condition"].to_numpy() == control]))
+    conditions = frame["condition"].to_numpy()
+    baseline = float(np.nanmean(values[conditions == control]))
     for arm in frame["condition"].unique():
-        rows = np.flatnonzero(frame["condition"].to_numpy() == arm)
+        rows = np.flatnonzero((conditions == arm) & ~np.isnan(values))
         if len(rows) == 0:
             continue
         wanted = float(np.clip(baseline + float(targets.get(arm, 0.0)), 0.0, 1.0))
@@ -227,6 +238,20 @@ def calibrate(
         if len(items) == len(design.composites[name])
     }
     via_items = {item for items in composites.values() for item in items}
+    # Every item of a composite is given the *composite's* effect vector, which is
+    # right when the items exist only to carry it (Pfänder's twelve trust items,
+    # which the benchmark never scores) and destroys the calibration when the
+    # items are themselves scored outcomes -- their own targets are silently
+    # replaced.  Declaring such a composite is a study-description error, so it
+    # stops here rather than printing a plausible number.
+    clashing = sorted(via_items & set(outcomes))
+    if clashing:
+        raise ValueError(
+            "composite items that are themselves scored outcomes: "
+            f"{', '.join(clashing)} — each would be given the composite's effects "
+            "instead of its own; drop the composite from the instrument, or the "
+            "items from the scored outcome set"
+        )
 
     continuous = [
         name
@@ -272,13 +297,16 @@ def calibrate(
     for outcome in design.binary:
         if outcome not in frame.columns:
             continue
-        rebuilt[outcome] = calibrate_binary(
+        moved = calibrate_binary(
             frame,
             outcome,
             _target_effects(frame, outcome, targets, control),
             seed=seed,
             control=control,
-        ).astype(int)
+        )
+        # ``astype(int)`` on a NaN is ``-2**63``, which then reads as a real
+        # answer everywhere downstream.  A nullable integer keeps the hole a hole.
+        rebuilt[outcome] = pd.array(moved, dtype="Float64").astype("Int64")
 
     return rebuilt, _audit(frame, rebuilt, parts, targets, drift, design)
 

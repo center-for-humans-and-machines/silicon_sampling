@@ -215,7 +215,12 @@ def _labels(values: pd.Series) -> pd.Series:
     every model drops those rows, so the labels are built to allow that.
     """
     text = values.astype(str)
-    return text.where(values.notna())
+    # A hole that has already been through ``astype(str)`` upstream arrives as the
+    # *string* ``"nan"`` and would otherwise survive as a level: ICPC's human
+    # ``age_band`` carried 44 interaction estimates for a group called ``"nan"``.
+    # No real codebook level spells itself this way, so they are holes here too.
+    stringified = text.isin({"nan", "NaN", "None", "<NA>", ""})
+    return text.where(values.notna() & ~stringified)
 
 
 def _numeric(values: pd.Series) -> pd.Series:
