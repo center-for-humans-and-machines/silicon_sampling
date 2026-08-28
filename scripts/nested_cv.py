@@ -392,6 +392,30 @@ def main(argv: list[str] | None = None) -> int:
             }
             rows.append(srow)
 
+        # The 2x2 that the Pfander prediction is built on: which of the two
+        # data-informed choices -- membership and the within-outcome factor -- is
+        # load-bearing, and what the recipe scores when each is charged as fitted
+        # rather than granted as a prior.  The "both fitted" corner is the
+        # ``recipe`` row above and the "both fixed" corner is the shipped design;
+        # these are the two mixed corners, which nothing else computes.
+        prior = ("qwen25_7b_v3", "qwen25_72b_v3")
+        if all(r in available for r in prior):
+            for label, membership, within in (
+                ("2x2: membership by prior, within fitted", prior, fit["within"]),
+                ("2x2: membership fitted, within fixed 0.5", fit["membership"], 0.5),
+            ):
+                tr = pd.concat(
+                    [effect_vector(d, membership, within) for d in train],
+                    ignore_index=True,
+                )
+                k = float(
+                    np.cov(tr["estimate_h"], tr["estimate_l"], ddof=1)[0, 1]
+                    / np.var(tr["estimate_l"], ddof=1)
+                )
+                te = effect_vector(data[held], membership, within)
+                te["estimate_l"] = k * te["estimate_l"]
+                rows.append({"held out": held, **section1(te), "what": label})
+
         # Membership decided by a pre-committed rule, instantiated on training.
         for label, (rule, within) in RULES.items():
             membership = rule(train, available)
@@ -487,6 +511,8 @@ def main(argv: list[str] | None = None) -> int:
     print("\n\n=== fold means (four folds: still too few for an interval) ===\n")
     order = [
         "recipe, fitted on the other two",
+        "2x2: membership by prior, within fitted",
+        "2x2: membership fitted, within fixed 0.5",
         *RULES,
         *FIXED,
         *[f"single: {r.replace('_v3', '')}, uncalibrated" for r in RUNS],
