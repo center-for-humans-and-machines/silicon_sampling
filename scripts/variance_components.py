@@ -257,7 +257,79 @@ def main() -> int:
         if muse in key:
             other = next(iter(key - {muse}))
             print(f'    frozenset({{"{muse}", "{other}"}}): {cov:.3f},')
+    project(components, covariances, seeds_by_model)
     return 0
+
+
+#: Four-fold held-out pooled ``pearson_r`` for the two membership structures the
+#: cross-validation can actually build, from ``scripts/nested_cv.py``.
+CV_SCORES = {"qwen": 0.344, "qwen+muse": 0.354}
+
+
+def project(components: dict, covariances: dict, seeds_by_model: dict) -> None:
+    """What the cross-validation's verdict becomes at the shipped seed counts.
+
+    The cross-validation compares **one run per model**, because that is all the
+    reference studies have. The submission averages several seeds of each Qwen, so
+    its Qwen side carries less sampling noise than the fold that endorsed it --
+    which means the fold *overstates* what a one-run newcomer adds.
+
+    Correcting for that is arithmetic once the variance components exist. An
+    observed correlation attenuates as the square root of the ensemble's
+    reliability, so divide the fold score by ``sqrt(reliability)`` at the fold's
+    seed counts to recover the correlation of the ensemble's *true* effect vector,
+    then multiply back at the shipped counts.
+
+    This reaches only the correlations. The gains Muse shows on ``rmse`` and
+    ``alpha`` are largely bias cancellation rather than noise averaging -- adding
+    a third model with different systematic error -- and those do not attenuate,
+    so they carry over closer to full strength.
+    """
+    from silicon_sampling.calibration import recipes as RR
+
+    saved_var, saved_cov = dict(RR.EFFECT_VARIANCE), dict(RR.EFFECT_COVARIANCE)
+    RR.EFFECT_VARIANCE.update(components)
+    RR.EFFECT_COVARIANCE.update(covariances)
+    try:
+        muse_runs = tuple(seeds_by_model["meta-models/Muse-Glimmer-30B"])
+        shipped = RR.BEST_RANKERS
+        print("\n  projection to the shipped seed counts\n")
+        print(f"    {'ensemble':32s} {'runs':>5s} {'reliability':>12s} {'r':>8s}")
+        true = {}
+        for label, runs, key in (
+            ("fold config: 1x7B + 1x72B", ("qwen25_7b", "qwen25_72b"), "qwen"),
+            (
+                "fold config + 1x Muse",
+                ("qwen25_7b", "qwen25_72b", "muse_glimmer_30b"),
+                "qwen+muse",
+            ),
+            ("shipped", shipped, None),
+            (f"shipped + {len(muse_runs)}x Muse", shipped + muse_runs, None),
+        ):
+            rel = RR.ensemble_reliability(runs)
+            if key is not None:
+                true[key] = CV_SCORES[key] / np.sqrt(rel)
+                shown = CV_SCORES[key]
+            else:
+                which = "qwen+muse" if len(runs) > len(shipped) else "qwen"
+                shown = true[which] * np.sqrt(rel)
+            print(f"    {label:32s} {len(runs):5d} {rel:12.4f} {shown:8.3f}")
+        base = true["qwen"] * np.sqrt(RR.ensemble_reliability(shipped))
+        with_muse = true["qwen+muse"] * np.sqrt(
+            RR.ensemble_reliability(shipped + muse_runs)
+        )
+        raw = CV_SCORES["qwen+muse"] - CV_SCORES["qwen"]
+        print(f"\n    projected change in pooled pearson_r: {with_muse - base:+.4f}")
+        print(f"    the fold's raw margin was {raw:+.4f}; the rest is seed asymmetry")
+        print(
+            f"\n    shrink_for_runs: shipped {RR.shrink_for_runs(shipped):.4f}"
+            f"  ->  with Muse {RR.shrink_for_runs(shipped + muse_runs):.4f}"
+        )
+    finally:
+        RR.EFFECT_VARIANCE.clear()
+        RR.EFFECT_VARIANCE.update(saved_var)
+        RR.EFFECT_COVARIANCE.clear()
+        RR.EFFECT_COVARIANCE.update(saved_cov)
 
 
 if __name__ == "__main__":
