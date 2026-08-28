@@ -329,11 +329,13 @@ def fit_on_training(train: list[dict], available: tuple[str, ...]) -> dict:
 #: folds pick those two instead adds fitting noise the real recipe never pays, so
 #: scoring only the fully-fitted variant understates it.
 #:
-#: The word "pre-committed" is doing less work than it did: ``WITHIN_SHRINK``
-#: 0.5's own docstring records that it was adopted after measuring pooled r
-#: across the reference studies, so it is a *prior about the form* (shrink toward
-#: the outcome profile) with a magnitude that was fitted once, globally.  The 2x2
-#: below is what charges that magnitude honestly.
+#: "Pre-committed" is doing a little less work than it sounds like.
+#: ``WITHIN_SHRINK`` 0.5 was adopted after leave-one-study-out picked it on 3 of 3
+#: folds, so it is a *prior about the form* -- shrink toward the outcome profile --
+#: with a magnitude that was fitted once, globally, on these same studies.  The
+#: selection optimism that buys is small and measured: over {0.3, 0.5, 1.0} the
+#: chosen value scores 0.005 above the mean of the set.  The 2x2 below charges the
+#: magnitude in full anyway, which is the conservative reading.
 FIXED = {
     "Qwen pair, within 0.5 (shipped design)": (("qwen25_7b_v3", "qwen25_72b_v3"), 0.5),
     "Qwen pair, no within shrink": (("qwen25_7b_v3", "qwen25_72b_v3"), 1.0),

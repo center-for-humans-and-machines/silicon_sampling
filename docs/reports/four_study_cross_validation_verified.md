@@ -203,7 +203,10 @@ independent ways that agree — the variance-components model in `recipes.py`
 over the seven runs stepped up by Spearman-Brown (0.9610). The third makes no
 independence assumption at all, which settles a doubt raised about counting the
 two `_demo` runs as seeds: they correlate 0.856 with their parent against 0.834
-for two elicited seeds, close enough that the reliability does not move.
+for two elicited seeds, close enough that the reliability does not move. A
+verifier who pushed hardest on that doubt put the fully corrected figure at
+**0.950**, so the defensible range is 0.950–0.961 and the multiplier below moves
+by at most 0.004 across it.
 
 The per-fold lift on correlations is therefore 1.000 (CCC), 1.065 (Goldwert),
 1.047 (ICPC), 1.009 (Voelkel) — a mean of **1.030**, against the 1.049 the old

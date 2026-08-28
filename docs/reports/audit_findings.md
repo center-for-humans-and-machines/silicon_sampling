@@ -6,8 +6,8 @@ Six auditors read the scripts and the package behind
 [four_study_cross_validation.md](four_study_cross_validation.md), each on a
 different surface, and raised 63 findings. Every CRITICAL and MAJOR one then
 went to an independent adversarial verifier told to refute it and to reproduce
-the defect itself before upholding it: **18 of 21 verdicts uphold the finding**,
-almost all of them with a corrected magnitude, and three refute it outright.
+the defect itself before upholding it: **19 of 24 verdicts uphold the finding**,
+almost all of them with a corrected magnitude, and five refute it outright.
 Findings below are ordered by how much they move a reported number.
 
 Two categories throughout:
@@ -335,7 +335,16 @@ The third makes no independence assumption at all — if two runs were
 near-duplicates their agreement would show up as agreement and pull the estimate
 down. It comes out *higher*. The pairwise evidence agrees: a `_demo` run
 correlates 0.856 with its parent against 0.834 for two elicited seeds, a
-difference far too small to matter. **0.957 stands.**
+difference far too small to matter.
+
+Two verifiers then attacked the same doubt from opposite directions and landed in
+the same place. One upheld the code-semantics point but measured its worth at
+**0.9574 → 0.9563** — a 0.11% change in the shrinkage constant, not the 1.9% the
+finding claimed. The other refuted the stated mechanism outright (the `_demo`
+runs' sampling noise is not measurably shared with their parent) and put the
+fully corrected figure at **0.950**. So the defensible range is **0.950–0.961**,
+the Pfänder multiplier moves by at most 0.004 across it, and **0.957 stands as a
+working figure.**
 
 ### 15. Several §5 and §4 figures are hand-typed and do not reproduce
 
@@ -439,6 +448,14 @@ the reasoning is the useful part:
 * **Stale `se_l` makes `beta_adj` wrong.** The code fact is real and I fixed it
   anyway, but the claimed failure scenario is false: `beta_adj` is never printed,
   and the folds the finding names have finite values.
+* **`WITHIN_SHRINK = 0.5` is scored as pre-committed but was fitted.** The
+  provenance claim is a misdiagnosis — git history shows the constant did not come
+  from where the finding says — and the selection optimism it buys is **0.005**,
+  two grades below the severity claimed. The docstring in `nested_cv.py` now
+  states the measured figure rather than the insinuation.
+* **The `_demo` runs are not independent seeds.** Refuted on the mechanism: their
+  noise sharing with the parent is essentially absent, measured three ways. See
+  finding 14.
 
 ## What was checked and found sound
 
