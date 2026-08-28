@@ -344,3 +344,89 @@ def test_no_two_ensemble_runs_of_one_model_are_the_same_draw():
                 )
 
     assert not duplicates, "these are one draw, not two: " + "; ".join(duplicates)
+
+
+def test_the_variance_components_reproduce_from_the_samples():
+    """The shipped signal/noise split has to be re-derivable, not just recorded.
+
+    ``EFFECT_VARIANCE`` and ``EFFECT_COVARIANCE`` were hand-computed and written
+    down. That is fine until someone needs to add a model, at which point the
+    question "what exactly was the procedure?" has to have an answer that agrees
+    with the numbers. ``scripts/variance_components.py`` is that procedure, and
+    this pins it: run it against the Qwen runs on disk and it must land on the
+    shipped constants.
+
+    Two decisions inside it are load-bearing and this is what keeps them:
+    ``_demo`` runs are not seeds -- they change the prompt and reuse the parent's
+    seed column, which pushes their correlation with it up from 0.745 to 0.856 --
+    and the cross-model correlation is averaged over every replicate pairing
+    rather than read off one, which moves the covariance from 4.025 to 3.604.
+    """
+    import importlib.util
+    import itertools
+    from pathlib import Path
+
+    import numpy as np
+
+    from silicon_sampling import models as MODELS
+    from silicon_sampling.calibration import tier1 as T1
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "variance_components.py"
+    spec = importlib.util.spec_from_file_location("variance_components", path)
+    vc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vc)
+
+    design = T1.pfander_instrument()
+    frames, vectors = {}, {}
+    for run in vc.CANDIDATES:
+        frame = vc.load(run)
+        if frame is None:  # pragma: no cover - some runs live only on scratch
+            continue
+        frames[run] = frame
+        vectors[run] = vc.effect_vector(frame, design)
+    index = None
+    for vector in vectors.values():
+        index = vector.index if index is None else index.intersection(vector.index)
+    vectors = {k: v.loc[index] for k, v in vectors.items()}
+
+    by_model = {}
+    for run in vectors:
+        by_model.setdefault(MODELS.MODELS[run], []).append(run)
+
+    seeds_by_model, components, reliabilities = {}, {}, {}
+    for model, runs in by_model.items():
+        seeds = vc.independent_seeds(runs, frames, design)
+        if len(seeds) < 2:
+            continue
+        rel = float(
+            np.mean(
+                [
+                    np.corrcoef(vectors[a], vectors[b])[0, 1]
+                    for a, b in itertools.combinations(seeds, 2)
+                ]
+            )
+        )
+        total = float(np.mean([vectors[r].var(ddof=1) for r in seeds]))
+        seeds_by_model[model] = seeds
+        reliabilities[model] = rel
+        components[model] = {"signal": rel * total, "noise": (1 - rel) * total}
+
+    for model, want in R.EFFECT_VARIANCE.items():
+        assert model in components, f"{model} has no independent replicates on disk"
+        for part in ("signal", "noise"):
+            assert components[model][part] == pytest.approx(want[part], abs=0.02)
+
+    for key, want in R.EFFECT_COVARIANCE.items():
+        left, right = sorted(key)
+        observed = float(
+            np.mean(
+                [
+                    np.corrcoef(vectors[x], vectors[y])[0, 1]
+                    for x in seeds_by_model[left]
+                    for y in seeds_by_model[right]
+                ]
+            )
+        )
+        true = observed / np.sqrt(reliabilities[left] * reliabilities[right])
+        cov = true * np.sqrt(components[left]["signal"] * components[right]["signal"])
+        assert cov == pytest.approx(want, abs=0.02)
