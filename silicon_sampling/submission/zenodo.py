@@ -3,13 +3,21 @@
 The benchmark ships ``scripts/zenodo_citation.R``, which turns ``metadata.json``
 into a ``.zenodo.json`` that controls the title, description, authors, license
 and keywords of the **permanent** Zenodo record a GitHub release creates. This
-container has no R, and the alternative to a port is depositing without the file
-— which the template warns produces "a poor record (empty description, no
-affiliation or license) for a DOI you cannot undo".
+container had no R when the file was written, and the alternative to a port was
+depositing without the file — which the template warns produces "a poor record
+(empty description, no affiliation or license) for a DOI you cannot undo".
 
 This is a port, not an improvement. Field names, ordering, the tier descriptors,
 the HTML paragraph wrapping of the abstract, the fallback description and the
 two related identifiers are all reproduced from the R.
+
+**Verified against the real generator.** ``scripts/zenodo_citation.R`` was run
+under R 4.6.1 on all three built entries and its output compared field by field
+with this module's: identical key sets, identical values, no differences. The
+ORCID check was differential-tested separately over ten cases — real ORCIDs
+including an ``X`` check digit, the all-zero dummy, a well-formed identifier that
+fails MOD-11-2, and malformed input — and the two implementations agree on every
+one.
 
 **The ORCID checksum is the part worth porting carefully.** A malformed ORCID —
 wrong shape, or a valid shape that fails its ISO 7064 MOD-11-2 check digit, which

@@ -92,7 +92,14 @@ ABSTRACTS = {
         "measurements of the same question rather than to a model's guess. Every "
         "free choice was fitted by nested leave-one-study-out cross-validation "
         "over four external megastudies and none on this study, which publishes "
-        "no outcome data."
+        "no outcome data.\n\n"
+        "The pipeline that produces this entry -- the code, the prompts the "
+        "simulated respondents see, the calibration, and the cross-validation "
+        "that selected it -- was designed and written by an LLM coding agent "
+        "(Claude Code, Claude Opus 5) rather than by people. The human team "
+        "chose to use base rather than instruction-tuned models, chose which "
+        "ones, chose the external studies used for validation and demographic "
+        "anchoring, and required a nested cross-validation."
     ),
     "secondary-1": (
         "As the team's primary entry, but without the final proportional "
@@ -100,6 +107,7 @@ ABSTRACTS = {
         "rank ordering of the predictions, only their magnitude, so this entry "
         "isolates the single dimension on which the two differ — it is the same "
         "method on every metric that is invariant to a positive scalar."
+        "As with the team's primary entry, the pipeline was designed and written by an LLM coding agent (Claude Code, Claude Opus 5) rather than by people."
     ),
     "secondary-2": (
         "A single open-weight base language model answering the study's "
@@ -107,7 +115,10 @@ ABSTRACTS = {
         "calibration, no ensembling, no external anchoring and no shrinkage. It "
         "is the uncalibrated baseline the team's other two entries are measured "
         "against, submitted so that the value of the calibration is visible in "
-        "the field rather than only in our own validation."
+        "the field rather than only in our own validation.\n\n"
+        "As with the team's other entries, the pipeline was designed and "
+        "written by an LLM coding agent (Claude Code, Claude Opus 5) rather "
+        "than by people."
     ),
 }
 
@@ -205,10 +216,18 @@ def main() -> int:
             )
         )
         models = tuple(dict.fromkeys(MODELS.MODELS.get(r, r) for r in used_runs))
+        # The authoring stage belongs in the machine-readable metadata too, not
+        # only in registration.md: the pipeline that produces these predictions
+        # was designed and written by an LLM coding agent rather than by people,
+        # and a benchmark about LLM capability should be able to see that without
+        # reading prose.
         family = (
-            "per-respondent simulation, multi-model component hybrid, zero-shot"
-            if len(models) > 1
-            else "per-respondent simulation, single model, zero-shot"
+            (
+                "per-respondent simulation, multi-model component hybrid, zero-shot"
+                if len(models) > 1
+                else "per-respondent simulation, single model, zero-shot"
+            )
+            + "; pipeline authored by an LLM coding agent (Claude Code / Claude Opus 5)"
         )
         result = SB.build_submission(
             frame,

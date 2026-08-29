@@ -132,7 +132,8 @@ Each is a complete copy of the benchmark's template with our content:
 `predictions/`, `raw_data_deposit/`, `metadata.json`, `registration.md`,
 `.zenodo.json`, `codebook.csv`, `survey/`.
 
-**All three: PASS, 51 checks, 0 failures, 0 warnings.**
+**All three: PASS, 51 checks, 0 failures, 0 warnings** — the verdict of the
+benchmark's own `scripts/check.R` under R 4.6.1, not of a reimplementation.
 
 | entry | prediction file | SHA-256 |
 | --- | --- | --- |
@@ -148,6 +149,16 @@ seeds. `secondary-2` is unchanged, as it must be: it uses one Qwen run.
 ## 4 · What you have to do to submit
 
 **Deadline: 31 August 2026.**
+
+**0 — Read `registration.md` section A.1 before anything else.** It now records that
+this entry's pipeline — the code, the prompts, the calibration, the
+cross-validation and the first draft of that form — was written by an **LLM
+coding agent** (Claude Code / Claude Opus 5) rather than by people, with the
+human decisions being: base models, which models, which validation studies, and
+that a cross-validation was required. An earlier draft of the form asserted the
+opposite and was wrong. If you disagree with how that is characterised, this is
+the item to change before depositing — it is a ★ item, so it must be public and
+accurate.
 
 **1 — Fill five items in `registration.md`** (identical in all three entries; edit
 once and copy). Each is marked `TODO-BEFORE-DEPOSIT` inline:
@@ -171,9 +182,12 @@ python -c "from silicon_sampling.submission import zenodo as Z; \
 ```
 
 **3 — Decide about the raw logs.** Each entry ships the raw export of the run its
-rows came from (14 MB). The complete generation logs for all runs are ~2.4 GB and
-are not in the deposit. Either mint a separate Zenodo upload and link it in K.2,
-or offer them on request.
+rows came from (14 MB). The **complete** generation logs — 234,000 session
+transcripts across all 13 runs, plus parsed answers and every rejected draw — are
+now recovered from the cluster, verified by checksum, and packed into 13 gzipped
+tarballs totalling **242 MB** in `data/pfander/generation_logs/`. That is small
+enough to mint as a separate Zenodo upload and link in K.2, which is what I would
+do; offering them on request is the other permitted option.
 
 **4 — One repository and one Zenodo deposit per entry.** For each of the three:
 clone the template at `/opt/silicon-sample-submission`, copy the entry's contents
@@ -183,10 +197,22 @@ in, delete the shipped `example_*` files, connect the repo to Zenodo, publish a
 **5 — Email all three DOIs and all three fingerprints together** to
 `janlukas.pfaender@gmail.com`.
 
-**6 — Optional but worth it: run `make check` once on a machine with R.** This
-container has no R, so validation ran through a line-by-line Python port of the
-benchmark's own `check.R`. Its schema agrees with the shipped `codebook.csv` on
-every run, but the port is good evidence rather than proof.
+**6 — Already done: the benchmark's own validator has now been run.** R 4.6.1
+(tidyverse 2.0.0, jsonlite 2.0.0, digest 0.6.39) was installed and
+`scripts/check.R` run against all three entries:
+
+```
+primary       OVERALL: PASS   (51 pass, 0 warn, 0 fail)
+secondary-1   OVERALL: PASS   (51 pass, 0 warn, 0 fail)
+secondary-2   OVERALL: PASS   (51 pass, 0 warn, 0 fail)
+```
+
+Compared row by row against the Python port used up to now: the same 51 checks,
+the same names, the same status on every one, for every entry.
+`scripts/zenodo_citation.R` was run too and its `.zenodo.json` is byte-equivalent
+to the ported generator's, with the ORCID checksum differential-tested over ten
+cases. So the earlier caveat is discharged — this is the real gate's verdict, not
+a stand-in's.
 
 ### One thing to weigh before you send it
 
