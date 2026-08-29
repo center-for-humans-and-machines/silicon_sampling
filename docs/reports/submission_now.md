@@ -149,6 +149,16 @@ seeds. `secondary-2` is unchanged, as it must be: it uses one Qwen run.
 
 **Deadline: 31 August 2026.**
 
+**0 — Read `registration.md` section A.1 before anything else.** It now records that
+this entry's pipeline — the code, the prompts, the calibration, the
+cross-validation and the first draft of that form — was written by an **LLM
+coding agent** (Claude Code / Claude Opus 5) rather than by people, with the
+human decisions being: base models, which models, which validation studies, and
+that a cross-validation was required. An earlier draft of the form asserted the
+opposite and was wrong. If you disagree with how that is characterised, this is
+the item to change before depositing — it is a ★ item, so it must be public and
+accurate.
+
 **1 — Fill five items in `registration.md`** (identical in all three entries; edit
 once and copy). Each is marked `TODO-BEFORE-DEPOSIT` inline:
 

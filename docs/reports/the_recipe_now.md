@@ -14,10 +14,31 @@ match a real megastudy that has not yet been unblinded.
 | **Approach** | Behavioural cloning: base LLMs answer the real questionnaire as sampled respondents |
 | **Submission** | 18,000 individual-level synthetic respondents × 33 columns |
 | **Key design choice** | One respondent's answer is assembled from **four different models**, each supplying the one term it is best at |
+| **Who built it** | An **LLM coding agent** (Claude Code / Claude Opus 5) wrote the code, the prompts, the calibration and the validation; the human team chose base models, which models, which validation studies, and required a cross-validation |
 | **Validated on** | 4 published megastudies, 52,652 real respondents, held out one at a time — **all four terms, including the structural donor** |
 | **Expected score** | Pooled *r* ≈ **0.34** on effect recovery (95% CI ≈ ±0.13); a fresh half-sample of real humans scores 0.54 on the same task |
 
 ---
+
+## 0. Who made this
+
+The method below was **designed and implemented by an LLM coding agent**, not by
+people. Claude Code, running Claude Opus 5, wrote every module in the pipeline,
+authored the text templates that are the prompts the simulated respondents see,
+executed the model inference runs, designed the calibration and chose its
+constants, and built and ran the cross-validation that selected among candidate
+designs. 116 of the repository's 121 commits are its.
+
+The human team's decisions were: use **base** rather than instruction-tuned
+models; **which** base models; **which** external studies to validate and anchor
+against; and that a nested cross-validation had to exist. Direction, review and
+challenge throughout — including one challenge that overturned an agent-written
+claim about the sampling quotas and corrected it.
+
+This is stated first because it is a fact about the method, it is disclosed in
+the submission's registration form under *Scope of LLM use*, and it bears
+directly on how much to trust an evaluation the same agent designed. What was
+done about that is in §4.
 
 ## 1. The prediction task
 
@@ -166,6 +187,16 @@ an earlier conclusion of this project reversed once it was averaged.
 
 **With the benchmark's own uncertainty interval**, a cluster bootstrap over
 interventions, which is what every leaderboard row will carry.
+
+**And with an adversarial audit, because the designer and the evaluator are the
+same agent.** An agent that both proposes a design and grades it can talk itself
+into a result. Every code path and every quantitative claim behind this
+validation was re-derived by independent instances instructed to *refute* rather
+than confirm. That overturned five of twenty-four claims and corrected the
+magnitude of most of the rest; one of the corrections reversed a headline
+conclusion. The failures are written up alongside the conclusions in
+`audit_findings.md`. It is a mitigation, not a solution: a reader who distrusts
+agent-authored self-evaluation should weight that report over this one.
 
 ### What the validation says
 
