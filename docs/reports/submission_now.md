@@ -146,60 +146,21 @@ seeds. `secondary-2` is unchanged, as it must be: it uses one Qwen run.
 
 ---
 
-## 4 · What you have to do to submit
+## 4 · What is left to do
 
 **Deadline: 31 August 2026.**
 
-**0 — Read `registration.md` section A.1 before anything else.** It now records that
-this entry's pipeline — the code, the prompts, the calibration, the
-cross-validation and the first draft of that form — was written by an **LLM
-coding agent** (Claude Code / Claude Opus 5) rather than by people, with the
-human decisions being: base models, which models, which validation studies, and
-that a cross-validation was required. An earlier draft of the form asserted the
-opposite and was wrong. If you disagree with how that is characterised, this is
-the item to change before depositing — it is a ★ item, so it must be public and
-accurate.
-
-**1 — Fill five items in `registration.md`** (identical in all three entries; edit
-once and copy). Each is marked `TODO-BEFORE-DEPOSIT` inline:
-
-- **0.1** team member name(s), affiliation, corresponding contact
-- **I.1** funding source (the factual half — no in-kind compute, no API, open
-  weights, institutional hardware — is already written)
-- **I.3** the blinding attestation — **mandatory, must be signed by a named
-  person**; draft text is in place and needs a name and date
-- **K.1** `code_doi`, only if you want to mint one
-- **K.3** a monetary cost figure, only if one is required
-
-**2 — Fill three fields in each `metadata.json`**: `team_name`, `contact`,
-`creators[0].name`. Add an ORCID only if it is real — an invalid checksum makes
-Zenodo reject the deposit with an opaque HTTP 500. Then regenerate the deposit
-record:
+Everything that could be prepared locally is prepared. Three repository-ready
+trees are staged at
 
 ```
-python -c "from silicon_sampling.submission import zenodo as Z; \
-           Z.write_zenodo('data/pfander/submission/primary')"
+/opt/silicon_sampling/data/pfander/submission_repos/{primary,secondary-1,secondary-2}
 ```
 
-**3 — Decide about the raw logs.** Each entry ships the raw export of the run its
-rows came from (14 MB). The **complete** generation logs — 234,000 session
-transcripts across all 13 runs, plus parsed answers and every rejected draw — are
-now recovered from the cluster, verified by checksum, and packed into 13 gzipped
-tarballs totalling **242 MB** in `data/pfander/generation_logs/`. That is small
-enough to mint as a separate Zenodo upload and link in K.2, which is what I would
-do; offering them on request is the other permitted option.
-
-**4 — One repository and one Zenodo deposit per entry.** For each of the three:
-clone the template at `/opt/silicon-sample-submission`, copy the entry's contents
-in, delete the shipped `example_*` files, connect the repo to Zenodo, publish a
-**GitHub release**, and take the DOI.
-
-**5 — Email all three DOIs and all three fingerprints together** to
-`janlukas.pfaender@gmail.com`.
-
-**6 — Already done: the benchmark's own validator has now been run.** R 4.6.1
-(tidyverse 2.0.0, jsonlite 2.0.0, digest 0.6.39) was installed and
-`scripts/check.R` run against all three entries:
+Each is a complete clone of the benchmark template — `scripts/`, `Makefile`,
+`codebook.csv`, `survey/` — with the entry's own `predictions/`,
+`raw_data_deposit/`, `metadata.json`, `registration.md` and `.zenodo.json` in
+place, and the shipped `example_*` files removed. `make check` run inside each:
 
 ```
 primary       OVERALL: PASS   (51 pass, 0 warn, 0 fail)
@@ -207,12 +168,51 @@ secondary-1   OVERALL: PASS   (51 pass, 0 warn, 0 fail)
 secondary-2   OVERALL: PASS   (51 pass, 0 warn, 0 fail)
 ```
 
-Compared row by row against the Python port used up to now: the same 51 checks,
-the same names, the same status on every one, for every entry.
-`scripts/zenodo_citation.R` was run too and its `.zenodo.json` is byte-equivalent
-to the ported generator's, with the ORCID checksum differential-tested over ten
-cases. So the earlier caveat is discharged — this is the real gate's verdict, not
-a stand-in's.
+That is the benchmark's own command, in the shape the real repositories will
+have. Nothing local remains.
+
+### The four steps only you can take
+
+1. **Make each tree a repository.** `git init`, commit, and push to its own
+   GitHub repo — three repos, since the rule is one entry = one repo = one
+   deposit. Nothing needs editing first.
+2. **Connect each repo to Zenodo** (Zenodo → log in with GitHub → flip the
+   repository on), then **publish a GitHub release**. Zenodo archives that
+   release and mints the DOI.
+3. **Email the three DOIs and the three fingerprints together** to
+   `janlukas.pfaender@gmail.com`.
+
+   | entry | file | SHA-256 |
+   | --- | --- | --- |
+   | primary | `team_21_T1_primary_v1.csv` | `80a58dd60cb7824d7f9b0330259b9953348091c6d321a54427f868b74f7a2e01` |
+   | secondary-1 | `team_21_T1_secondary-1_v1.csv` | `f6fe5b3ca08c8a10c3321991c6a1d6499200c4be43204ad20269359266138754` |
+   | secondary-2 | `team_21_T1_secondary-2_v1.csv` | `e6a1d5d38308d5707b0b5e75f1daa0169ff783f1020477ca59b7039122807f12` |
+
+4. **Optionally** record each `zenodo_doi` back into its `metadata.json`
+   afterwards. Not required for scoring — emailing the DOI is enough.
+
+### Two wording calls you may still want to make
+
+Neither blocks the deposit; both are ★ or † items where the current text is
+accurate but thin.
+
+- **I.1 competing interests** says what was *not* received (no in-kind compute,
+  no paid API, open weights, institutional hardware) but names no funding source.
+  If there is no specific grant, one sentence saying so closes it.
+- **K.3 computational resources** reports ≈78 GPU-hours and notes the figure is a
+  lower bound. Three of the thirteen runs still have no `run_meta.json` — their
+  generation logs were recovered from the cluster but their run metadata was
+  not — so the compute total remains an undercount. The sentence is true as
+  written; it could name the three runs.
+
+### What changed since this report was first written
+
+`team_id` moved from `mpib` to `team_21` after the metadata was filled in, which
+renamed every prediction file. The payloads are byte-identical under the new
+names, so the fingerprints above are unchanged from the earlier build. `code_doi`
+now carries on all three entries rather than the primary alone, and every
+`.zenodo.json` was regenerated from the edited metadata and re-verified against
+the R generator.
 
 ### One thing to weigh before you send it
 
