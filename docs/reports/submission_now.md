@@ -137,9 +137,9 @@ benchmark's own `scripts/check.R` under R 4.6.1, not of a reimplementation.
 
 | entry | prediction file | SHA-256 |
 | --- | --- | --- |
-| primary | `mpib_T1_primary_v1.csv` | `80a58dd60cb7824d7f9b0330259b9953348091c6d321a54427f868b74f7a2e01` |
-| secondary-1 | `mpib_T1_secondary-1_v1.csv` | `f6fe5b3ca08c8a10c3321991c6a1d6499200c4be43204ad20269359266138754` |
-| secondary-2 | `mpib_T1_secondary-2_v1.csv` | `e6a1d5d38308d5707b0b5e75f1daa0169ff783f1020477ca59b7039122807f12` |
+| primary | `team_21_T1_primary_v1.csv` | `80a58dd60cb7824d7f9b0330259b9953348091c6d321a54427f868b74f7a2e01` |
+| secondary-1 | `team_21_T1_secondary-1_v1.csv` | `f6fe5b3ca08c8a10c3321991c6a1d6499200c4be43204ad20269359266138754` |
+| secondary-2 | `team_21_T1_secondary-2_v1.csv` | `e6a1d5d38308d5707b0b5e75f1daa0169ff783f1020477ca59b7039122807f12` |
 
 The first two fingerprints are new — those files were rebuilt on the added Muse
 seeds. `secondary-2` is unchanged, as it must be: it uses one Qwen run.
