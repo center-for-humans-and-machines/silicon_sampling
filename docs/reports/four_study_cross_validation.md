@@ -1,3 +1,16 @@
+> **Superseded.** Every script and method behind this report was re-derived from
+> the data up; the results are in
+> [four_study_cross_validation_verified.md](four_study_cross_validation_verified.md)
+> and the defects in [audit_findings.md](audit_findings.md).
+>
+> **Read the summary before any number below.** Most of this holds. One defect
+> moves every effect-recovery figure: CCC's constant-sum donation was scored on a
+> budget the silicon samples never obeyed, so `Donation` ran to 500 on a 0–100
+> scale, and every four-fold mean here is 0.015–0.024 too high. §5's party-gap
+> argument does not survive at all — it rests on a distance measured against the
+> wrong anchor set and contradicts §3's own measurement. And every cell comes
+> from a single half-split whose draw reverses the bolded claim in §2.
+
 # Four studies, four models: what the expansion changed
 
 [← back to the final report](README.md) · reproduce with

@@ -41,18 +41,75 @@ Run: ``python scripts/build_entries.py [--team-id mpib] [--out-root ...]``
 from __future__ import annotations
 
 import argparse
+import shutil
 from pathlib import Path
 
 
 from silicon_sampling.anchors import ccc as ccc_anchors
 from silicon_sampling.anchors import levels as anchor_levels
+from silicon_sampling import models as MODELS
 from silicon_sampling.calibration import recipes as R
 from silicon_sampling.calibration import tier1 as T1
 from silicon_sampling.submission import build as SB
 from silicon_sampling.submission import check as SC
 from silicon_sampling.submission import spec as SP
+from silicon_sampling.submission import zenodo as ZEN
 
-RAW_EXPORT = Path("data/pfander/silicon_sampling/qwen25_7b/samples.csv")
+
+#: The raw deposit must be the raw output of the run whose respondents are
+#: actually submitted -- ``recipe.template_run``, i.e. the first entry of
+#: ``effects_from``, which supplies the rows.  A fixed path here shipped
+#: ``qwen25_7b``'s export beside rows drawn from ``qwen25_7b_demo``: a
+#: transparency record of a different run than the one on trial.
+def raw_export_for(recipe) -> Path:
+    """The samples file of the run that supplies this recipe's respondents."""
+    return Path("data/pfander/silicon_sampling") / recipe.template_run / "samples.csv"
+
+
+#: The completed registration form, shared by all three entries.  ``stage_template``
+#: copies the *blank* one from the benchmark template and never overwrites an
+#: existing file, so the filled version is written over it here.  Items that differ
+#: between entries are marked inline in the form rather than split into three files.
+REGISTRATION = Path("data/pfander/submission/registration_filled.md")
+
+#: One plain-language paragraph per entry, for ``metadata.json``'s ``abstract`` —
+#: which is what Zenodo turns into the permanent record's description.  The recipe
+#: string is appended as a second paragraph so the record carries both the readable
+#: summary and the exact configuration.
+ABSTRACTS = {
+    "primary": (
+        "Eighteen thousand synthetic survey respondents, each walked through the "
+        "study's own questionnaire item by item by open-weight base language "
+        "models. A synthetic respondent's answer is overwhelmingly set by where "
+        "the response distribution sits rather than by which message they read — "
+        "the intervention effect is about 0.03% of a response's variance — and the "
+        "benchmark scores those two things separately, so no single model is good "
+        "at all of them. Each answer is therefore assembled from four models, each "
+        "supplying the one additive term it predicts best: which interventions "
+        "move which outcomes, where the control-arm distribution sits, how "
+        "demographic groups differ, and how spread out individual answers are. "
+        "Eight of thirteen control-arm levels are set to independent published "
+        "measurements of the same question rather than to a model's guess. Every "
+        "free choice was fitted by nested leave-one-study-out cross-validation "
+        "over four external megastudies and none on this study, which publishes "
+        "no outcome data."
+    ),
+    "secondary-1": (
+        "As the team's primary entry, but without the final proportional "
+        "rescaling of the predicted effects. That rescaling cannot change the "
+        "rank ordering of the predictions, only their magnitude, so this entry "
+        "isolates the single dimension on which the two differ — it is the same "
+        "method on every metric that is invariant to a positive scalar."
+    ),
+    "secondary-2": (
+        "A single open-weight base language model answering the study's "
+        "questionnaire as eighteen thousand synthetic respondents, with no "
+        "calibration, no ensembling, no external anchoring and no shrinkage. It "
+        "is the uncalibrated baseline the team's other two entries are measured "
+        "against, submitted so that the value of the calibration is visible in "
+        "the field rather than only in our own validation."
+    ),
+}
 
 
 def entries(anchors: dict[str, float]) -> list[tuple[str, R.Recipe]]:
@@ -67,7 +124,7 @@ def entries(anchors: dict[str, float]) -> list[tuple[str, R.Recipe]]:
         party_gap_anchors=R.PARTY_GAP_ANCHORS,
         party_gap_weight=R.PARTY_GAP_WEIGHT,
         residual_scale=R.RESIDUAL_SCALE,
-        flatten_noise=True,
+        flatten_noise=False,
         level_anchors=anchors,
     )
     return [
@@ -127,8 +184,31 @@ def main() -> int:
         )
 
         out_dir = root / entry
-        models = tuple(
-            dict.fromkeys((*recipe.effect_runs, *filter(None, [recipe.level_from])))
+        # The registration form asks for "exact identifiers incl. provider, size,
+        # version" -- our internal run names are neither, so they are mapped back
+        # to the Hugging Face ids the runs actually loaded.  Several runs share a
+        # model; the list is of models, not of runs.
+        used_runs = tuple(
+            dict.fromkeys(
+                (
+                    *recipe.effect_runs,
+                    *filter(
+                        None,
+                        [
+                            recipe.level_from,
+                            recipe.offsets_from,
+                            recipe.residuals_from,
+                            recipe.party_offsets_from,
+                        ],
+                    ),
+                )
+            )
+        )
+        models = tuple(dict.fromkeys(MODELS.MODELS.get(r, r) for r in used_runs))
+        family = (
+            "per-respondent simulation, multi-model component hybrid, zero-shot"
+            if len(models) > 1
+            else "per-respondent simulation, single model, zero-shot"
         )
         result = SB.build_submission(
             frame,
@@ -136,14 +216,29 @@ def main() -> int:
             meta=SB.SubmissionMeta(
                 team_id=args.team_id,
                 entry=entry,
-                abstract=f"{R.describe(recipe)} — {recipe.notes}".strip(" —"),
+                abstract=(
+                    f"{ABSTRACTS[entry]}\n\n" f"Configuration: {R.describe(recipe)}."
+                ),
                 models=list(models),
+                approach_family=family,
             ),
-            raw_export=RAW_EXPORT if RAW_EXPORT.exists() else None,
+            raw_export=(raw if (raw := raw_export_for(recipe)).exists() else None),
             template_root=SP.default_template_root(),
             overwrite=True,
         )
         print(f"    wrote {result.predictions.name} ({result.rows} rows)")
+
+        if REGISTRATION.exists():
+            shutil.copyfile(REGISTRATION, out_dir / "registration.md")
+            print(f"    registration: {REGISTRATION.name}")
+        else:  # pragma: no cover - the blank template stays in place
+            print(f"    registration: {REGISTRATION} missing, blank form left in place")
+
+        # `.zenodo.json` controls the permanent Zenodo record a GitHub release
+        # creates.  Without it Zenodo auto-generates one with an empty description
+        # and no license, for a DOI that cannot be withdrawn.
+        payload = ZEN.write_zenodo(out_dir)
+        print(f"    zenodo: {payload['title']}")
 
         verdict = SC.check_repo(out_dir)
         print(f"    check: {verdict.verdict}  {verdict.counts()}")

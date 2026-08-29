@@ -13,9 +13,17 @@ real respondents on nine outcomes that Pfander's crosswalk reaches.
 
 **The leakage rule.**  Six of the nine shipped party-gap anchors and five of the
 eight dispersion anchors were measured *on CCC*.  Grading a CCC prediction that
-used them against CCC humans would be scoring a number against itself.  So this
-script switches them off via :func:`silicon_sampling.anchors.ccc.for_study`, which
-returns no anchors when CCC is the held-out study.  What is left is what genuinely
+used them against CCC humans would be scoring a number against itself.
+
+The grading path below never applies an anchor at all — it takes each run's raw
+control arm, optionally rescales its residuals, and compares that with CCC's
+humans.  So there is nothing for a filter to remove, and an earlier version of
+this docstring claiming the anchors were "switched off" by
+:func:`silicon_sampling.anchors.ccc.for_study` described a mechanism that was not
+running: the call's return value was printed and discarded.  It is now an
+**assertion** rather than a print — the script refuses to run if that function
+ever starts returning anchors for its own study, which is the failure this was
+meant to guard against.  What the table therefore shows is what genuinely
 transfers:
 
 * ``RESIDUAL_SCALE = 1.12``, fitted on TISP's three trust outcomes
@@ -49,7 +57,11 @@ from silicon_sampling.ccc import score as SCORE
 
 warnings.filterwarnings("ignore")
 
-RUNS = ("qwen25_7b", "qwen25_72b", "muse_glimmer_30b")
+#: Every model with a CCC sample.  ``v4_flash`` joined last and matters most:
+#: it is the run the shipped entry takes its levels, demographic offsets and
+#: residual spread from, and until its CCC sample existed the structural half of
+#: the recipe could not be graded out of sample at all.
+RUNS = ("qwen25_7b", "qwen25_72b", "muse_glimmer_30b", "v4_flash")
 
 #: Half-split seed, matching ``benchmark.reference.half_split`` so the human
 #: ceiling reported here is the same split the cross-validation uses.
@@ -58,7 +70,12 @@ SEED = 20240517
 
 def controls(frame: pd.DataFrame) -> pd.DataFrame:
     """The pooled control arm, whichever vocabulary the frame arrived with."""
-    return SCORE.pool_controls(frame).query("condition == @SCORE.CONTROL")
+    # ``prepare`` rather than ``pool_controls``: CCC's donation was rendered as
+    # six unconstrained sliders, so a raw silicon sample allocates up to 500 on a
+    # 0-100 budget every real respondent was held to, and its education and party
+    # labels are in the on-screen vocabulary rather than the released file's.
+    # Grading either against the humans compares different quantities.
+    return SCORE.prepare(frame).query("condition == @SCORE.CONTROL")
 
 
 def party_gap(frame: pd.DataFrame, outcome: str, span: float) -> float:
@@ -127,8 +144,16 @@ def main() -> int:
     pd.set_option("display.width", 250)
 
     withheld = CCC_ANCHORS.for_study("CCC")
+    if withheld:
+        raise SystemExit(
+            "leakage guard: anchors.ccc.for_study('CCC') returned "
+            f"{len(withheld)} anchors for CCC's own fold — grading a CCC "
+            "prediction against CCC humans with CCC-derived anchors scores a "
+            "number against itself"
+        )
     print("=== leakage guard ===\n")
     print(f"  anchors available with CCC held out: {withheld or '(none)'}")
+    print("  (asserted, not merely reported: the run stops if this is non-empty)")
     shipped_from_ccc = [
         k
         for k in R.PARTY_GAP_ANCHORS

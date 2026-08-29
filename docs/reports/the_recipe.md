@@ -1,3 +1,14 @@
+> **Superseded** by [the recipe I would ship today](the_recipe_now.md), which
+> revises four components against the
+> [verified cross-validation](four_study_cross_validation_verified.md): a third
+> model joins the effect average, `flatten_noise` comes out, the
+> `policy_general` anchor moves to the item Pfänder actually reuses, and the
+> party-gap weight and global shrink constant are both corrected.
+>
+> Two numbers below are also stale: the effect average is seven runs, not eight
+> (one was a duplicate draw), and the projected r of 0.448 assumed a reliability
+> of 0.964 that is really 0.957.
+
 # The recipe, part by part, with ablations
 
 [← back to the final report](README.md) · reproduce with

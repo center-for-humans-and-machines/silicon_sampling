@@ -84,9 +84,117 @@ def pool_controls(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+#: The six boxes of the constant-sum donation item: five organisations plus
+#: "keep for myself".
+DONATION_BOXES = tuple(f"Donation_{index}" for index in range(1, 7))
+
+
+def normalise_donation(frame: pd.DataFrame) -> pd.DataFrame:
+    """Put the donation allocation back on the budget the survey enforced.
+
+    CCC's donation question is a **constant-sum** item: Qualtrics holds the six
+    boxes to a total of exactly 100, and every one of the 13,173 real respondents
+    obeys it because the instrument would not let them do otherwise.  The
+    transcript the silicon samples were drawn against rendered it as six
+    independent sliders with no such constraint, so the models allocate whatever
+    they like -- 42% of Qwen2.5-7B's respondents, 13% of Qwen2.5-72B's and 1% of
+    Muse's write a total other than 100, and totals reach 600.  ``Donation`` is
+    then the raw sum of five of those boxes, which runs to 500 on a scale the
+    scoring code declares to be 0-100.
+
+    This cannot be re-elicited, so it is repaired: the six boxes are rescaled to
+    total 100, which preserves the respondent's *relative* allocation -- the only
+    thing a constant-sum item actually elicits -- and discards an absolute
+    magnitude the instrument never asked for.  Rows whose six boxes total zero
+    have no allocation to preserve and are left missing rather than invented.
+
+    On the human frame this is the identity, since the totals are already 100.
+    It moves the synthetic control means *toward* the humans (65.5 -> 63.2 and
+    66.9 -> 61.6 against a human 60.6), so it is a correction rather than a
+    rescaling that happens to flatter.
+    """
+    if not all(box in frame.columns for box in DONATION_BOXES):
+        return frame
+    out = frame.copy()
+    boxes = out[list(DONATION_BOXES)].apply(pd.to_numeric, errors="coerce")
+    total = boxes.sum(axis=1, min_count=len(DONATION_BOXES))
+    factor = np.where(total > 0, 100.0 / total.where(total > 0), np.nan)
+    for box in DONATION_BOXES:
+        out[box] = boxes[box] * factor
+    if "Donation" in out.columns:
+        out["Donation"] = out[list(DONATION_BOXES[:5])].sum(
+            axis=1, min_count=len(DONATION_BOXES) - 1
+        )
+    return out
+
+
+#: The survey's on-screen education wording, and the three levels the released
+#: human file collapses it to.  The clone carries the real respondent's education
+#: -- the two sides' counts agree exactly, 4765 / 4262 / 3730 -- so this is
+#: relabelling, not recoding.
+EDUCATION_ONSCREEN_TO_RELEASED = {
+    "Bachelor's degree": "Bachelor or Postgraduate",
+    "Master's degree / Professional degree": "Bachelor or Postgraduate",
+    "Doctorate degree / Ph.D.": "Bachelor or Postgraduate",
+    "Some college or Associate's degree": "Some college",
+    "High school diploma / GED": "HS or less",
+    "Less than high school": "HS or less",
+}
+
+#: The elicited party answer, folded onto the released file's three-way coding.
+#:
+#: The human variable is ``PartyC3``, which folds leaners into the party they
+#: lean toward; the synthetic variable is the model's own self-identification,
+#: which has no leaner follow-up to fold.  Mapping the residual categories onto
+#: ``Neither`` puts both sides on the same three groups, which is the most that
+#: can be done after the fact -- the leaner question was never asked of the
+#: models, so their ``Neither`` stays larger than the humans' (31% against 13%).
+#: Any party-gap comparison on CCC carries that caveat.
+PARTY_ELICITED_TO_RELEASED = {
+    "Democrat": "Democrat",
+    "Republican": "Republican",
+    "Independent": "Neither",
+    "Other": "Neither",
+    "Other (please specify)": "Neither",
+    "Neither": "Neither",
+}
+
+
+def harmonise_moderators(frame: pd.DataFrame) -> pd.DataFrame:
+    """Put the synthetic moderator labels in the released file's vocabulary.
+
+    Left undone, ``education`` and ``party`` carry different level names on the
+    two sides, so every subgroup interaction, demographic baseline and parity gap
+    is computed against a reference level that does not exist on the other side --
+    which the benchmark's grid assertion catches as a join of 748 pairs where 836
+    were expected, and which a looser scorer would have reported as a number.
+    """
+    out = frame.copy()
+    for column, mapping in (
+        ("education", EDUCATION_ONSCREEN_TO_RELEASED),
+        ("party", PARTY_ELICITED_TO_RELEASED),
+    ):
+        if column not in out.columns:
+            continue
+        labels = out[column].astype(str)
+        out[column] = labels.map(mapping).fillna(labels)
+    return out
+
+
+def prepare(frame: pd.DataFrame) -> pd.DataFrame:
+    """Everything a CCC frame needs before it is scored, human or synthetic.
+
+    Pooling the placebo arms, repairing the constant-sum donation and putting the
+    moderator labels in one vocabulary all have to happen to *both* sides, or the
+    two carry different condition names, different budgets and different
+    demographic groups.
+    """
+    return harmonise_moderators(normalise_donation(pool_controls(frame)))
+
+
 def effects(frame: pd.DataFrame) -> pd.DataFrame:
     """Simple ATEs per outcome, in pp of scale range — the benchmark's estimand."""
-    frame = pool_controls(frame)
+    frame = prepare(frame)
     present = {k: v for k, v in oc.SCORED.items() if k in frame.columns}
     return treatment_effects(frame, present, control=CONTROL)
 
