@@ -181,9 +181,12 @@ python -c "from silicon_sampling.submission import zenodo as Z; \
 ```
 
 **3 — Decide about the raw logs.** Each entry ships the raw export of the run its
-rows came from (14 MB). The complete generation logs for all runs are ~2.4 GB and
-are not in the deposit. Either mint a separate Zenodo upload and link it in K.2,
-or offer them on request.
+rows came from (14 MB). The **complete** generation logs — 234,000 session
+transcripts across all 13 runs, plus parsed answers and every rejected draw — are
+now recovered from the cluster, verified by checksum, and packed into 13 gzipped
+tarballs totalling **242 MB** in `data/pfander/generation_logs/`. That is small
+enough to mint as a separate Zenodo upload and link in K.2, which is what I would
+do; offering them on request is the other permitted option.
 
 **4 — One repository and one Zenodo deposit per entry.** For each of the three:
 clone the template at `/opt/silicon-sample-submission`, copy the entry's contents
