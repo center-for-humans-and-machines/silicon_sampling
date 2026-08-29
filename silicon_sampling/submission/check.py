@@ -2,10 +2,18 @@
 
 The benchmark ships its own validator — ``scripts/check.R`` calling
 ``scripts/lib/check_lib.R`` — and it is the only statement of what "accepted"
-means.  R is not installable in this container (``r-base-core`` is not in the
-apt index), so without a port we would be depositing a file whose format has
-never been tested.  This module is a line-by-line port of ``check_repo`` and
+means.  R was not installable in this container when this was written, so
+without a port we would have been depositing a file whose format had never been
+tested.  This module is a line-by-line port of ``check_repo`` and
 ``check_submission`` for the checks a Tier-1 entry hits.
+
+**The port has since been checked against the real thing and agrees exactly.**
+With R 4.6.1 (tidyverse 2.0.0, jsonlite 2.0.0, digest 0.6.39) available,
+``scripts/check.R`` was run against all three built entries and compared row by
+row: the same 51 checks, the same names, the same PASS/WARN/FAIL on every one,
+for every entry.  So this is no longer a substitute for the gate — it is a
+verified reimplementation of it, and a divergence in either direction is now a
+regression worth investigating rather than an expected difference.
 
 Fidelity, not improvement, is the whole point.  Two consequences:
 

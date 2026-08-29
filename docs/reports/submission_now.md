@@ -132,7 +132,8 @@ Each is a complete copy of the benchmark's template with our content:
 `predictions/`, `raw_data_deposit/`, `metadata.json`, `registration.md`,
 `.zenodo.json`, `codebook.csv`, `survey/`.
 
-**All three: PASS, 51 checks, 0 failures, 0 warnings.**
+**All three: PASS, 51 checks, 0 failures, 0 warnings** — the verdict of the
+benchmark's own `scripts/check.R` under R 4.6.1, not of a reimplementation.
 
 | entry | prediction file | SHA-256 |
 | --- | --- | --- |
@@ -196,10 +197,22 @@ in, delete the shipped `example_*` files, connect the repo to Zenodo, publish a
 **5 — Email all three DOIs and all three fingerprints together** to
 `janlukas.pfaender@gmail.com`.
 
-**6 — Optional but worth it: run `make check` once on a machine with R.** This
-container has no R, so validation ran through a line-by-line Python port of the
-benchmark's own `check.R`. Its schema agrees with the shipped `codebook.csv` on
-every run, but the port is good evidence rather than proof.
+**6 — Already done: the benchmark's own validator has now been run.** R 4.6.1
+(tidyverse 2.0.0, jsonlite 2.0.0, digest 0.6.39) was installed and
+`scripts/check.R` run against all three entries:
+
+```
+primary       OVERALL: PASS   (51 pass, 0 warn, 0 fail)
+secondary-1   OVERALL: PASS   (51 pass, 0 warn, 0 fail)
+secondary-2   OVERALL: PASS   (51 pass, 0 warn, 0 fail)
+```
+
+Compared row by row against the Python port used up to now: the same 51 checks,
+the same names, the same status on every one, for every entry.
+`scripts/zenodo_citation.R` was run too and its `.zenodo.json` is byte-equivalent
+to the ported generator's, with the ORCID checksum differential-tested over ten
+cases. So the earlier caveat is discharged — this is the real gate's verdict, not
+a stand-in's.
 
 ### One thing to weigh before you send it
 
